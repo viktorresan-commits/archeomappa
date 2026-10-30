@@ -1,13 +1,15 @@
-// Scheda «Rilievo»: carica un DTM/LiDAR (GeoTIFF o ASCII Grid), lo mostra sulla mappa in varie
+// Scheda «Rilievo»: prende il LiDAR dal servizio del Geoportale (nessun file da caricare) oppure, in
+// alternativa avanzata, da un DTM (GeoTIFF o ASCII Grid) dell'utente; lo mostra sulla mappa in varie
 // visualizzazioni e cerca anomalie (recinti, strutture circolari, tracciati lineari).
-// Il file resta sul dispositivo: viene letto a pezzi da un Web Worker e non viene mai inviato altrove.
+// Il calcolo avviene in un Web Worker sul dispositivo; un eventuale file non viene mai inviato altrove.
 
 import { h, meta, mem, inCsv, scarica } from "./util.js";
 import { creaMotore } from "./motore.js";
 import { VISUALIZZAZIONI } from "./analisi.js";
 import { impostazioniPredefinite, anomalieInGeoJSON } from "./detect.js";
 import { cercaSitiOSM, cercaEdificiStrade, CATEGORIE } from "./sources.js";
-import { formatDist } from "./geo.js";
+import { formatDist, haversine } from "./geo.js";
+import { scaricaFinestra } from "./lidar-servizio.js";
 
 const SISTEMI = [
   [32632, "UTM 32N WGS84 (EPSG:32632)"], [32633, "UTM 33N WGS84 (EPSG:32633)"], [32634, "UTM 34N WGS84 (EPSG:32634)"],
@@ -60,7 +62,7 @@ function dentroCopertura(c, cop) {
 }
 
 export function iniziaRilievo(ctx) {
-  const { map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro, impostaCentro, fmtCoord, gen, pubblica, metaEsportazione, nomeFile, cerchio } = ctx;
+  const { map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro, impostaCentro, fmtCoord, gen, pubblica, metaEsportazione, nomeFile, cerchio, sorgenteLidar, fonteLidar, cambiaFonteLidar } = ctx;
   const motore = creaMotore();
   const base = { raggioKm: 1, vis: "multi", esag: 2, opacita: 75, epsg: 32632, overrides: {} };
   const salvato = { ...base, ...mem.get("am.rilievo", {}) };
@@ -75,12 +77,15 @@ export function iniziaRilievo(ctx) {
   let urlImmagine = null;
   let file = null;
   let info = null;
+  let modo = "servizio"; // «servizio» (predefinito) oppure «file» (opzione avanzata)
+  let scaricato = null; // ultima area scaricata dal servizio: {lat, lon, raggioM, base, livello}
   let ultimi = null; // risultato dell'ultima ricerca di anomalie
   let inCorso = false;
 
   // ---------------------------------------------------------------- impostazioni
-  const profilo = () => impostazioniPredefinite(info?.pixelM ?? 2).profilo;
-  const predefiniti = () => impostazioniPredefinite(info?.pixelM ?? 2);
+  const profilo = () => impostazioniPredefinite(info?.pixelM ?? (modo === "servizio" ? 1 : 2)).profilo;
+  const predefiniti = () => impostazioniPredefinite(info?.pixelM ?? (modo === "servizio" ? 1 : 2));
+  const unita = () => (info?.relativo ? "livelli" : "m");
   const sovrascritti = () => salvato.overrides[profilo()];
   const effettivi = () => ({ ...predefiniti(), ...sovrascritti() });
 
@@ -117,8 +122,8 @@ export function iniziaRilievo(ctx) {
     $("relSettings").replaceChildren(
       ...GRUPPI.flatMap((g) => [h("h3", null, g.titolo), ...g.campi.map(campo)]),
       h("p", { class: "hint" }, info
-        ? `Valori per il profilo «${profilo() === "dettaglio" ? "dettaglio" : "grossolano"}», scelto dal pixel del file (${fmtNum(info.pixelM)} m). Ogni profilo ricorda le sue modifiche.`
-        : "I valori dipendono dal pixel del file: carica un rilievo per vedere quelli del suo profilo."),
+        ? `Valori per il profilo «${profilo() === "dettaglio" ? "dettaglio" : "grossolano"}», scelto dal pixel del rilievo (${fmtNum(info.pixelM)} m). Ogni profilo ricorda le sue modifiche.`
+        : "I valori dipendono dal pixel del rilievo: mostrati qui sono quelli del profilo «dettaglio», adatto al LiDAR a 1 m."),
       h("div", { class: "row" }, h("button", { type: "button", class: "btn", onclick: () => { salvato.overrides[profilo()] = {}; salva(); disegnaImpostazioni(); toast("Impostazioni del rilevatore ripristinate."); } }, "Ripristina questo profilo")),
     );
   }
@@ -135,7 +140,15 @@ export function iniziaRilievo(ctx) {
     const c = info.copertura;
     $("relInfo").replaceChildren(
       h("div", { class: "pt" }, info.nome || "Rilievo"),
-      h("div", { class: "hint" }, `${info.larghezza}×${info.altezza} pixel · pixel da ${fmtNum(info.pixelM)} m · ${info.proiezione || "EPSG:" + info.epsg}`),
+      h("div", { class: "hint" }, `${info.larghezza}×${info.altezza} pixel · pixel da ${fmtNum(info.pixelM)} m · ${info.servizio ? "scaricato dal servizio" : info.proiezione || "EPSG:" + info.epsg}`),
+      ...(info.servizio
+        ? [
+            h("div", { class: "hint" }, info.relativo
+              ? "Valori: livelli di grigio relativi, non metri. Le forme si leggono; altezze e pendenze no."
+              : `Valori: metri, ricavati dai grigi del servizio (un livello di grigio vale circa ${fmtNum(info.passoM, 2)} m).`),
+            ...info.avvisi.map((a) => h("div", { class: "hint" }, a)),
+          ]
+        : []),
       h("div", { class: "hint" }, `Copre da ${fmtNum(c.sud, 3)}° a ${fmtNum(c.nord, 3)}° N e da ${fmtNum(c.ovest, 3)}° a ${fmtNum(c.est, 3)}° E`),
       h("div", { class: "hint" }, notaRisoluzione(info.pixelM)),
       h("button", { type: "button", class: "link", onclick: vaiAlRilievo }, "Vai al rilievo"),
@@ -180,7 +193,7 @@ export function iniziaRilievo(ctx) {
     try {
       const opzioni = asc || epsg ? { epsg: epsg ?? Number($("relEpsg").value) } : {};
       const i = await motore.apri(f, opzioni);
-      file = f; info = i;
+      file = f; info = i; modo = "file"; scaricato = null;
       box.hidden = !asc;
       pulisciRisultati();
       togliImmagine();
@@ -196,18 +209,52 @@ export function iniziaRilievo(ctx) {
         stato("relStatus", "Rilievo aperto. Scegli la visualizzazione e tocca «Mostra il rilievo».");
       }
     } catch (e) {
-      file = null; info = null;
+      file = null; info = null; scaricato = null;
       mostraInfo(); abilita(); disegnaCopertura();
       const msg = messaggioErrore(e);
       box.hidden = !(asc || /sistema di coordinate/i.test(msg));
       stato("relStatus", `Non riesco ad aprire il file: ${msg}`, true);
     } finally {
+      aggiornaFonte();
       mostraEsito("relStatus");
     }
   }
 
+  function aggiornaFonte() {
+    $("btnRelServizio").hidden = modo !== "file";
+    $("relFonteBox").hidden = modo === "file";
+    $("relFonte").textContent = fonteLidar?.() ? `Scelto: ${fonteLidar()}.` : "Nessun livello scelto: la prima volta ti chiedo regione e livello.";
+  }
+
+  function tornaAlServizio() {
+    modo = "servizio"; file = null; info = null; scaricato = null;
+    $("relFile").value = ""; $("relCrsBox").hidden = true;
+    pulisciRisultati(); togliImmagine(); disegnaCopertura(); mostraInfo(); disegnaImpostazioni(); abilita(); aggiornaFonte();
+    stato("relStatus", "Uso di nuovo il LiDAR del servizio.");
+  }
+
+  /** Scarica dal servizio l'area attorno al centro, se non l'ho già, e la apre nel motore. */
+  async function assicuraServizio(c, raggioM) {
+    const fonte = await sorgenteLidar();
+    if (!fonte) throw new Error("Scegli prima regione e livello del LiDAR.");
+    const g = scaricato;
+    if (g && info && g.base === fonte.base && g.livello === fonte.livello && haversine(c.lat, c.lon, g.lat, g.lon) < 5 && raggioM <= g.raggioM + 1) return;
+    const d = await scaricaFinestra({
+      base: fonte.base, livello: fonte.livello, lat: c.lat, lon: c.lon, raggioM, nome: fonte.nome,
+      avanzamento: (t) => stato("relStatus", t),
+    });
+    stato("relStatus", "Preparo il rilievo…");
+    info = await motore.apriPixel({ dati: d.dati, w: d.w, h: d.h, bbox: d.bbox, nome: d.nome, relativo: d.relativo, passoM: d.passoM, avvisi: d.avvisi });
+    scaricato = { lat: c.lat, lon: c.lon, raggioM, base: fonte.base, livello: fonte.livello };
+    pulisciRisultati();
+    togliImmagine();
+    disegnaCopertura();
+    mostraInfo();
+    disegnaImpostazioni();
+  }
+
   function abilita() {
-    const pronto = !!info && !inCorso;
+    const pronto = (modo === "servizio" || !!info) && !inCorso;
     $("btnRelShow").disabled = !pronto;
     $("btnRelFind").disabled = !pronto || pubblica();
     $("relModeNote").hidden = !pubblica();
@@ -250,19 +297,21 @@ export function iniziaRilievo(ctx) {
   }
 
   async function esegui(cerca) {
-    if (!info || inCorso) return;
+    if (inCorso) return;
+    if (modo === "file" && !info) return;
     if (cerca && pubblica()) { stato("relStatus", "Il rilevatore è disattivato nella modalità pubblica.", true); return; }
     const c = ottieniCentro();
-    if (!dentroCopertura(c, info.copertura)) {
+    if (modo === "file" && !dentroCopertura(c, info.copertura)) {
       stato("relStatus", "Il centro di ricerca è fuori dal rilievo. Tocca «Vai al rilievo» oppure sposta il centro dentro l'area tratteggiata.", true);
       mostraEsito("relStatus");
       return;
     }
     const raggioM = salvato.raggioKm * 1000;
-    const eff = effettivi();
     inCorso = true;
     occupato($("btnRelShow"), true); occupato($("btnRelFind"), true);
     try {
+      if (modo === "servizio") await assicuraServizio(c, raggioM);
+      const eff = effettivi();
       let esterni = {}, avvisiEst = [];
       if (cerca) {
         stato("relStatus", "Scarico siti noti, edifici e strade da OpenStreetMap…");
@@ -281,7 +330,7 @@ export function iniziaRilievo(ctx) {
         const rl = r.rilevamento;
         const n = rl.anomalie.length;
         parti.push(n ? `${n} ${n === 1 ? "anomalia" : "anomalie"} su ${fmtNum(2 * raggioM / 1000)} km di lato` : "Nessuna anomalia con queste impostazioni");
-        parti.push(`contrasto minimo ${fmtNum(rl.soglia, 2)} m`);
+        parti.push(`contrasto minimo ${fmtNum(rl.soglia, 2)} ${r.griglia.unita ?? "m"}`);
         const s = rl.scartate;
         const scarti = [[s.forma, "per forma"], [s.confidenza, "sotto la confidenza minima"], [s.sitoNoto, "vicino a siti noti"], [s.edificio, "su edifici"], [s.strada, "lungo strade"]].filter(([v]) => v);
         if (scarti.length) parti.push("scartate " + scarti.map(([v, t]) => `${v} ${t}`).join(", "));
@@ -290,6 +339,7 @@ export function iniziaRilievo(ctx) {
         parti.push(`Rilievo mostrato (${VISUALIZZAZIONI.find((v) => v.id === salvato.vis)?.nome.toLowerCase()})`);
         parti.push(`pixel da ${fmtNum(r.griglia.cella)} m`);
       }
+      if (info?.relativo) parti.push("valori relativi (livelli di grigio): altezze, pendenze ed esagerazione verticale non sono in metri");
       parti.push(...r.avvisi.filter((a) => !/non contiene quote/.test(a)));
       parti.push(`${fmtNum((performance.now() - t0) / 1000)} s`);
       stato("relStatus", frasePuntata(parti), cerca && (avvisiEst.length > 0));
@@ -300,16 +350,17 @@ export function iniziaRilievo(ctx) {
       inCorso = false;
       occupato($("btnRelShow"), false); occupato($("btnRelFind"), false);
       abilita();
+      aggiornaFonte();
       mostraEsito("relStatus");
     }
   }
 
   // ----------------------------------------------------------------- risultati
-  function popup(a) {
+  function popup(a, u = "m") {
     return h("div", null,
       h("div", { class: "pt" }, `${a.id}. ${a.tipo}`),
       h("div", { class: "pm" }, `Confidenza ${pct(a.punteggio)} · ${formatDist(a.dimensioneM)}`),
-      h("div", { class: "pm" }, `${a.polarita === "positiva" ? "Rilievo" : a.polarita === "negativa" ? "Avvallamento" : "Rilievo e avvallamento"} · contrasto medio ${fmtNum(a.contrastoM, 2)} m`),
+      h("div", { class: "pm" }, `${a.polarita === "positiva" ? "Rilievo" : a.polarita === "negativa" ? "Avvallamento" : "Rilievo e avvallamento"} · contrasto medio ${fmtNum(a.contrastoM, 2)} ${u}`),
       a.sitoNotoM != null ? h("div", { class: "pm" }, `Sito noto più vicino: ${formatDist(a.sitoNotoM)}`) : null,
       a.tagliata ? h("div", { class: "pm" }, "Tocca il bordo dell'area analizzata: forma incompleta.") : null,
       h("div", { class: "pm" }, "Ipotesi di studio: da verificare con ortofoto, fonti e un sopralluogo autorizzato. Non indica dove scavare."),
@@ -319,13 +370,13 @@ export function iniziaRilievo(ctx) {
   function disegnaRisultati(rl, r, c, raggioM) {
     gruppo.clearLayers();
     const anomalie = rl.anomalie;
-    ultimi = { rl, anomalie, centro: { ...c }, raggioM, impEff: r.impEff, cella: r.griglia.cella, file: info?.nome ?? "" };
+    ultimi = { rl, anomalie, centro: { ...c }, raggioM, impEff: r.impEff, cella: r.griglia.cella, file: info?.nome ?? "", unita: r.griglia.unita ?? "m", servizio: !!info?.servizio, passoM: info?.passoM ?? null };
     const marcatori = new Map();
     for (const a of anomalie) {
       const col = COLORI[a.codice];
       const opts = { color: col, weight: a.codice === "lineare" ? 3.5 : 2.5, opacity: 0.55 + 0.4 * a.punteggio, fillColor: col, fillOpacity: 0.14, bubblingMouseEvents: false };
       const g = a.geom.tipo === "linea" ? L.polyline(a.geom.coord, opts) : L.polygon(a.geom.coord, opts);
-      g.bindPopup(() => popup(a)).addTo(gruppo);
+      g.bindPopup(() => popup(a, r.griglia.unita ?? "m")).addTo(gruppo);
       marcatori.set(a.id, g);
     }
     const conteggi = {};
@@ -354,10 +405,11 @@ export function iniziaRilievo(ctx) {
     const { anomalie, rl } = ultimi;
     if (tipo === "geo") {
       const fc = anomalieInGeoJSON(anomalie, {
-        ...metaEsportazione(), file_rilievo: ultimi.file, pixel_m: ultimi.cella, raggio_m: ultimi.raggioM,
-        contrasto_minimo_m: Number(rl.soglia.toFixed(3)), regole: rl.regole, impostazioni: ultimi.impEff,
+        ...metaEsportazione(), file_rilievo: ultimi.file, fonte_rilievo: ultimi.servizio ? "LiDAR dal servizio WMS del Geoportale nazionale" : "file dell'utente",
+        pixel_m: ultimi.cella, raggio_m: ultimi.raggioM, unita_quote: ultimi.unita === "m" ? "metri" : "livelli di grigio relativi (non metri)",
+        passo_verticale_m: ultimi.passoM, contrasto_minimo: Number(rl.soglia.toFixed(3)), regole: rl.regole, impostazioni: ultimi.impEff,
         avvertenza_rilievo: "Anomalie dedotte dalla forma del terreno: ipotesi da verificare, non scoperte.",
-      });
+      }, ultimi.unita);
       scarica(nomeFile("anomalie", "geojson"), JSON.stringify(fc, null, 1), "application/geo+json");
     } else {
       scarica(nomeFile("anomalie", "csv"), inCsv(anomalie, [
@@ -366,7 +418,7 @@ export function iniziaRilievo(ctx) {
         { titolo: "confidenza_pct", valore: (a) => Math.round(a.punteggio * 100) },
         { titolo: "dimensione_m", valore: (a) => Math.round(a.dimensioneM) },
         { titolo: "area_m2", valore: (a) => Math.round(a.areaM2) },
-        { titolo: "contrasto_m", valore: (a) => a.contrastoM.toFixed(2) },
+        { titolo: ultimi.unita === "m" ? "contrasto_m" : "contrasto_livelli", valore: (a) => a.contrastoM.toFixed(2) },
         { titolo: "polarita", valore: (a) => a.polarita },
         { titolo: "lat", valore: (a) => gen(a.lat) },
         { titolo: "lon", valore: (a) => gen(a.lon) },
@@ -408,7 +460,12 @@ export function iniziaRilievo(ctx) {
   $("btnRelFind").addEventListener("click", () => esegui(true));
   $("btnRelGeo").addEventListener("click", () => esporta("geo"));
   $("btnRelCsv").addEventListener("click", () => esporta("csv"));
+  $("btnRelFonte").addEventListener("click", async () => {
+    try { await cambiaFonteLidar?.(); } finally { aggiornaFonte(); }
+  });
+  $("btnRelServizio").addEventListener("click", tornaAlServizio);
   disegnaImpostazioni();
+  aggiornaFonte();
   abilita();
 
   return {

@@ -3,6 +3,7 @@
 // Web Worker (js/worker-rilievo.js) sia, se il worker non parte, nel thread principale.
 
 import { apriRilievo, estraiGriglia } from "./raster.js";
+import { metaDaPixel } from "./lidar-servizio.js";
 import {
   riempiVuoti, ombreggiatura, direzioni, lrm, svf, pendenza, statisticheRobuste,
   coloraVisualizzazione, riproiettaPerMappa,
@@ -27,6 +28,8 @@ export function descriviRilievo(meta) {
     nome: meta.nome ?? "", tipo: meta.tipo ?? "tiff", larghezza: meta.larghezza, altezza: meta.altezza,
     epsg: meta.epsg ?? null, proiezione: meta.proiezione?.nome ?? "", pixelM: Math.min(meta.pixelMetri.dx, meta.pixelMetri.dy),
     copertura: { ...meta.copertura },
+    servizio: meta.tipo === "servizio",
+    relativo: !!meta.relativo, passoM: meta.passoM ?? null, avvisi: [...(meta.avvisi ?? [])],
   };
 }
 
@@ -64,6 +67,13 @@ export function creaSessione() {
       return descriviRilievo(meta);
     },
 
+    /** Apre una griglia già scaricata dal servizio: {dati, w, h, bbox, nome, relativo, passoM, avvisi}. */
+    async apriPixel(p) {
+      meta = metaDaPixel({ ...p, dati: p.dati instanceof Float32Array ? p.dati : new Float32Array(p.dati) });
+      cache = null;
+      return descriviRilievo(meta);
+    },
+
     /**
      * p = {lat, lon, raggioM, vis:{tipo, esagerazione}, cercaAnomalie, imp, esterni}
      * Restituisce {immagine:{rgba,w,h,bounds}, griglia:{w,h,cella,k}, avvisi, ms, impEff, rilevamento?}
@@ -78,9 +88,15 @@ export function creaSessione() {
         cache = { chiave, g: await estraiGriglia(meta, p.lat, p.lon, p.raggioM), pieno: null };
       }
       const g = cache.g;
+      g.unita = meta.relativo ? "livelli" : "m";
       const impEff = { ...impostazioniPredefinite(g.cella), ...(p.imp ?? {}) };
       const t1 = Date.now();
-      const out = { griglia: { w: g.w, h: g.h, cella: g.cella, k: g.k }, avvisi: [...g.avvisi], impEff };
+      const out = {
+        griglia: { w: g.w, h: g.h, cella: g.cella, k: g.k, unita: g.unita },
+        // per i dati del servizio il ricampionamento è già detto altrove: non lo ripeto
+        avvisi: g.avvisi.filter((a) => !(meta.tipo === "servizio" && /ricampionato in UTM/.test(a))),
+        impEff,
+      };
 
       avanzamento("Preparo la visualizzazione…");
       await pausa();

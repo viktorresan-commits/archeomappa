@@ -10,7 +10,7 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
   let id = 0;
   const attese = new Map();
   let modalita = "da-avviare";
-  let ultimaApertura = null; // per riaprire il file se il worker viene ricreato dopo un arresto
+  let ultimaApertura = null; // {op, dati}: per riaprire il rilievo se il worker viene ricreato dopo un arresto
   let daRiaprire = false;
 
   const fallisciTutto = (messaggio) => {
@@ -60,10 +60,11 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
     await avvia();
     if (daRiaprire && op === "analizza" && !locale) {
       daRiaprire = false;
-      await chiama("apri", ultimaApertura);
+      await chiama(ultimaApertura.op, ultimaApertura.dati);
     }
     if (locale) {
       if (op === "apri") return locale.apri(dati.file, dati.opzioni);
+      if (op === "apriPixel") return locale.apriPixel(dati);
       if (op === "analizza") return locale.analizza(dati, avanzamento);
       return locale.chiudi();
     }
@@ -75,7 +76,9 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
   }
 
   return {
-    apri: (file, opzioni = {}) => { ultimaApertura = { file, opzioni }; return chiama("apri", ultimaApertura); },
+    apri: (file, opzioni = {}) => { ultimaApertura = { op: "apri", dati: { file, opzioni } }; return chiama("apri", ultimaApertura.dati); },
+    /** Griglia già scaricata dal servizio (la copia resta qui per poter riaprire dopo un arresto del calcolo). */
+    apriPixel: (griglia) => { ultimaApertura = { op: "apriPixel", dati: griglia }; return chiama("apriPixel", griglia); },
     analizza: (parametri, avanzamento) => chiama("analizza", parametri, avanzamento),
     chiudi: () => chiama("chiudi", null),
     get modalita() { return modalita; },

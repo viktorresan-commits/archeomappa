@@ -18,7 +18,11 @@ Non ha account, pagamenti, pubblicità né tracciamento. Tutto resta nel disposi
 
 ### Fase 2: rilievo LiDAR e anomalie (scheda «Rilievo»)
 
-Carichi un modello digitale del terreno (DTM) e l'app lo legge **sul dispositivo**, senza inviarlo a nessuno, con un Web Worker (se il browser non lo permette calcola nel thread principale, più lentamente).
+**Fonte predefinita: il LiDAR del servizio, senza caricare file.** Scegli sulla mappa il centro e il raggio, tocca «Mostra il rilievo» o «Cerca anomalie»: l'app scarica dal servizio WMS del Geoportale nazionale (regione e livello scelti nei Livelli, per ora Marche e Umbria) l'immagine del DTM attorno al centro, a blocchi che si sovrappongono, e la elabora **sul dispositivo** con un Web Worker (se il browser non lo permette calcola nel thread principale, più lentamente). Serve l'app Android oppure, dal sito, il proxy (vedi sotto): una pagina https non può leggere i pixel del servizio del Ministero.
+
+Il servizio non dà le quote ma un'immagine a 256 livelli di grigio (la stessa idea del filtro di microrilievo dell'app di riferimento). Per non indovinare, l'app chiede al servizio la quota vera in 9 punti (GetFeatureInfo, come fa l'app di riferimento) e la confronta con i grigi di quei punti: se la relazione è una retta (R² ≥ 0,98) i grigi diventano **metri** e si dichiara quanti metri vale un livello; altrimenti restano **livelli relativi** (le forme si leggono, le altezze no) e l'app lo scrive nella scheda e nei file esportati. Se il servizio adatta i grigi a ogni richiesta, i blocchi vengono riallineati fra loro. Se il passo è grosso (più di mezzo metro per livello) lo dice: i dislivelli piccoli non si distinguono.
+
+In alternativa avanzata si può usare un file proprio (GeoTIFF o ASCII Grid), che resta sul dispositivo e non viene inviato a nessuno.
 
 - **Formati**: GeoTIFF (non compresso, LZW, Deflate o PackBits, a strisce o a tessere, anche BigTIFF, interi o decimali, con predittore) e ASCII Grid (`.asc`, di cui va indicato il sistema di coordinate). Sistemi supportati: UTM WGS84 e ETRS89 (EPSG 326xx e 258xx), WGS84 e ETRS89 in gradi, Web Mercator. **Gauss-Boaga non è supportato**: riproietta il file in UTM 32N con QGIS.
 - **Visualizzazioni**: ombreggiatura multidirezionale o da nord-ovest, rilievo locale (arancio = rialzo, blu = avvallamento), cielo visibile (SVF), pendenza e una combinata. Sono quelle usate in archeologia per far emergere rialzi e fossati poco visibili.
@@ -27,7 +31,7 @@ Carichi un modello digitale del terreno (DTM) e l'app lo legge **sul dispositivo
 - **Filtri**: scarta le anomalie sopra edifici e lungo strade attuali (da OpenStreetMap, richiede rete; senza rete il filtro non si applica e lo dice) e quelle vicine a siti già noti.
 - Nella modalità «pubblica» il rilevatore è disattivato (si può solo guardare il rilievo).
 
-**Dove prendere i dati.** Non c'è un servizio da cui scaricare in automatico: si scarica il file e lo si carica a mano. Fonti da verificare di persona, comprese le licenze correnti:
+**Dove prendere un file proprio (facoltativo).** Fonti da verificare di persona, comprese le licenze correnti:
 
 - TINITALY (INGV): DTM a 10 m di tutta Italia in GeoTIFF. Va bene per provare ma vede solo forme grandi.
 - PST / Ministero dell'Ambiente (MASE): DTM e DSM LiDAR a circa 1 m, con copertura parziale, dal Geoportale Nazionale.
@@ -85,7 +89,8 @@ Nessuna dipendenza npm (Node 18 o più recente). Le prove sul rilievo creano da 
 - `tests/test-visual.mjs`: proiezioni, ombreggiatura, rilievo locale, cielo visibile, colori;
 - `tests/test-detect.mjs`: forme, regole di classificazione, rilevatore sul terreno finto a 2 e 10 m, filtri, GeoJSON;
 - `tests/test-analisi.mjs`: sessione di analisi, cache, motore con e senza worker, arresto del worker;
-- `tests/test-layers.mjs`: livelli del Ministero (nomi dei livelli, http/https secondo l'ambiente, proxy), client nativo dell'app Android e programma del proxy.
+- `tests/test-layers.mjs`: livelli del Ministero (nomi dei livelli, http/https secondo l'ambiente, proxy), client nativo dell'app Android e programma del proxy;
+- `tests/test-servizio.mjs`: rilievo dal LiDAR del servizio contro un servizio simulato (grigi a scala fissa e adattati a ogni richiesta): indirizzi, blocchi e riallineamento, calibrazione in metri, errori del servizio, analisi completa che ritrova tumulo, recinto e aggere.
 
 Per rigenerare le icone: `python3 tools/make_icons.py` (richiede Pillow).
 
@@ -100,7 +105,9 @@ js/epochs.js                 epoche stimate dalle parole del testo
 js/sources.js                OpenStreetMap, Wikipedia, Commons, Archive, Europeana, WMS
 js/layers.js                 registro dei livelli, http/https, proxy, prova dei servizi
 js/util.js                   DOM sicuro, CSV, cache, rete
-js/rilievo-ui.js             scheda «Rilievo»: file, visualizzazioni, risultati, export
+js/rilievo-ui.js             scheda «Rilievo»: fonte (servizio o file), visualizzazioni, risultati, export
+js/lidar-servizio.js         LiDAR dal servizio WMS: blocchi, calibrazione in metri, metadati per l'analisi
+js/tessere.js                tessere WMS: ripiego con il client nativo e diagnosi «Perché non si vede?»
 js/motore.js                 Web Worker con ripiego sul thread principale
 js/worker-rilievo.js         il worker
 js/analisi.js                sessione: lettura, visualizzazione, rilevamento
@@ -123,21 +130,22 @@ La mappa usa Leaflet 1.9.4 caricato da unpkg; il service worker lo conserva in c
 - **Dati**: i siti noti vengono da OpenStreetMap, che è volontario e incompleto. Non sostituisce il Catalogo Generale dei Beni Culturali né i vincoli ufficiali.
 - **Epoche**: stimate dalle parole del testo (nome, descrizione, tag). Sono un indizio, non una datazione.
 - **Soglie delle zone**: i valori predefiniti (0,25 e 0,55, distanza minima 700 m) sono un punto di partenza. Con dati molto densi quasi tutto risulta «alto»: vanno tarati con l'ufficio su aree già studiate.
-- **LiDAR dai servizi WMS del Ministero**: i nomi dei file e dei livelli di Marche e Umbria vengono da un'app Android che li usa davvero (Marche: DTM 1 m e 2 m, DSM primo e ultimo impulso; Umbria: DTM 1 m, anche del volo 2014, DSM 2014). Per le altre regioni il nome del livello va letto dal servizio, e dal sito non è possibile (CORS): sono segnate «da verificare». Non ho potuto contattare i servizi del Ministero dall'ambiente di sviluppo, quindi **non so se rispondano anche in https**: dal sito, senza proxy, il LiDAR potrebbe non vedersi (l'app lo dice in un messaggio). Nell'app Android si usa `http`, come l'app di riferimento.
+- **LiDAR dai servizi WMS del Ministero**: i nomi dei file e dei livelli di Marche e Umbria vengono da un'app Android che li usa davvero (Marche: DTM 1 m e 2 m, DSM primo e ultimo impulso; Umbria: DTM 1 m, anche del volo 2014, DSM 2014). Per le altre regioni il nome del livello va letto dal servizio, e dal sito non è possibile (CORS): sono segnate «da verificare». Non ho potuto contattare i servizi del Ministero dall'ambiente di sviluppo, quindi **non so se rispondano anche in https**: dal sito, senza proxy, il LiDAR potrebbe non vedersi (l'app lo dice in un messaggio). Nell'app Android si usa `http`, come l'app di riferimento. Se una tessera non si carica con l'immagine normale, l'app riprova con il client nativo e, se il servizio risponde con un errore, mostra il suo messaggio; il pulsante «Perché non si vede?» (Livelli) prova una tessera di ogni livello acceso e mostra risposta, miniatura e indirizzo.
+- **Come l'app ricava il rilievo dal servizio**: non ho potuto vedere le immagini vere del Ministero. Quel che so viene dall'app di riferimento (formato delle richieste, zoom nativo 17 per 1 m, lettura della quota con GetFeatureInfo). Non so se i grigi siano a scala fissa per tutta la regione (in tal caso un livello vale diversi metri e i tumuli bassi spariscono) o adattati a ogni richiesta; l'app lo misura a ogni scarico e lo scrive. Su un servizio simulato (terreno con tumulo alto 2,2 m, recinto con argine di 1,3 m e aggere basso di 1 m; raggio 500 m) la sensibilità dipende dal passo: a 0,5 m per livello ritrova tumulo e recinto ma non l'aggere basso; a 1,3 m solo il tumulo; a 2,4 m per livello non trova nulla e l'app lo dice (pochi livelli, nessuna conversione in metri). Con grigi adattati a ogni richiesta ritrova tumulo e recinto. È un test della catena di calcolo, non una misura sul LiDAR vero.
 - **Altri servizi WMS istituzionali**: ortofoto 2012 ha il livello noto (stessa fonte); IGM e catasto no, e il nome si legge dal servizio, quando il browser lo consente. I servizi `http` (come SITAP) funzionano solo nell'app Android.
 - **Rilevatore non tarato su dati reali**: è stato provato solo su un terreno finto. Le soglie predefinite sono un punto di partenza ragionevole, non un risultato di taratura: su LiDAR vero vanno verificate e regolate confrontando con strutture note. Boschi, cave, argini, muri a secco, campi lavorati e rilievi naturali possono dare falsi positivi; strutture molto degradate o più piccole del pixel sfuggono. Il rilevatore dà ipotesi da verificare con ortofoto, fonti e sopralluogo autorizzato, non scoperte.
 - **Pixel da 10 m (TINITALY)**: si vedono solo forme grandi, e sul terreno finto il risultato cambiava con il raggio di analisi (la soglia automatica dipende dall'area). Per tumuli, fossati e piccoli forti servono dati a 1–2 m.
 - **Memoria e tempi**: l'area analizzata è un quadrato di lato fino a 6 km; oltre 6 milioni di pixel la risoluzione viene ridotta (e lo dice). Su telefoni con poca memoria un file ASCII molto grande può non aprirsi: meglio un GeoTIFF ritagliato.
-- **Il file non viene salvato**: dopo la chiusura dell'app va caricato di nuovo. Restano salvate le impostazioni.
-- **Non ancora presenti**: punteggio da idrografia (APM), edifici scomparsi, scaricamento automatico del LiDAR dai servizi pubblici, GNA, vincoli ufficiali, rapporto in PDF.
+- **Nulla viene salvato**: il LiDAR scaricato e un eventuale file proprio vanno richiesti di nuovo dopo la chiusura dell'app. Restano salvate le impostazioni e la scelta di regione e livello.
+- **Non ancora presenti**: punteggio da idrografia (APM), edifici scomparsi, scaricamento del LiDAR di altre regioni (di cui non conosco i nomi dei livelli), GNA, vincoli ufficiali, rapporto in PDF.
 
 ## Come è stata verificata
 
 Le prove della logica passano. L'interfaccia è stata provata in Chromium headless con una libreria cartografica sostitutiva e servizi simulati: schede, ricerca, filtri, zone, fonti, esportazioni, modalità pubblica, protezione dall'iniezione di HTML, cache e riapertura senza rete. Per il rilievo, sempre in Chromium: caricamento di un GeoTIFF e di un ASCII, lettura nel Web Worker e ripiego senza worker, sei visualizzazioni, ricerca delle anomalie, filtro edifici, esportazioni, file non valido, impostazioni salvate.
 
-Il livello del Ministero è stato provato in Chromium con Leaflet vero e risposte simulate in tre casi: app Android simulata (richieste `http`, immagini caricate), sito `https` senza proxy (richieste `https` e messaggio chiaro se il servizio non risponde) e sito con proxy. Il programma del proxy è provato con un servizio simulato.
+Il livello del Ministero è stato provato in Chromium con Leaflet vero e risposte simulate in tre casi: app Android simulata (richieste `http`, immagini caricate), sito `https` senza proxy (richieste `https` e messaggio chiaro se il servizio non risponde) e sito con proxy. Il programma del proxy è provato con un servizio simulato. In Chromium, con client nativo simulato, sono provati anche: il ripiego quando l'immagine normale non carica, il messaggio vero del servizio in caso di errore, il pulsante «Perché non si vede?», il rilievo dal servizio senza file (scelta regione e livello, scarico, quote in metri o livelli relativi, ricerca delle anomalie, nessun riscarico se l'area non cambia) e lo stesso dal sito con proxy che consente la lettura.
 
-Non è stata provata su telefoni veri, con i servizi del Ministero reali, **con la costruzione dell'APK su GitHub (non eseguibile dall'ambiente di sviluppo)**, con un proxy messo davvero online né **con un file LiDAR italiano vero**: nessun dato reale era raggiungibile. Va fatta una prova sul campo prima di consegnarla.
+Non è stata provata su telefoni veri, con i servizi del Ministero reali (nemmeno le immagini LiDAR che restituiscono davvero), **con la costruzione dell'APK su GitHub (non eseguibile dall'ambiente di sviluppo)**, con un proxy messo davvero online né **con un file LiDAR italiano vero**: nessun dato reale era raggiungibile. Va fatta una prova sul campo prima di consegnarla.
 
 ## Note legali
 

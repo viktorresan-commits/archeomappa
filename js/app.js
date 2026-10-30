@@ -14,8 +14,9 @@ import {
 } from "./layers.js";
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
+import { aggiungiRipiegoNativo, provaTessera } from "./tessere.js";
 
-const VERSIONE = "0.2.2";
+const VERSIONE = "0.3.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -189,37 +190,75 @@ function elencoRegioni(d) {
 }
 
 function messaggioTessere(r) {
+  if (r.messaggio) return `«${r.def.nome}»: ${r.messaggio}. Tocca «Perché non si vede?» qui sotto per i dettagli.`;
   if (usaPcn(r.urlEffettivo) && !ambiente().httpConsentito) {
     return `«${r.def.nome}»: il servizio del Ministero non risponde da una pagina https. Usa l'app Android oppure imposta un proxy (riquadro «Servizi del Ministero» qui sotto).`;
   }
-  return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento.`;
+  return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento. Tocca «Perché non si vede?» qui sotto per i dettagli.`;
 }
 
 let zCont = 10;
+
+/** Regione e livello del LiDAR: usa la scelta salvata, altrimenti la chiede. Restituisce false se annullata. */
+async function sceglieLidar(r) {
+  const d = r.def;
+  const regione = mem.get("am.lidarRegione", null) ?? (await scegli("Scegli la regione", elencoRegioni(d)));
+  if (!regione) return false;
+  r.urlEffettivo = adattaUrl(urlRegione(d, regione));
+  const prodotti = prodottiRegione(d, regione);
+  let prodotto = null;
+  if (prodotti.length) {
+    const salvato = mem.get("am.lidarLivello", null);
+    prodotto = prodotti.find((p) => p.livello === salvato) ?? (prodotti.length === 1 ? prodotti[0] : null);
+    if (!prodotto) {
+      const scelto = await scegli("Quale livello?", prodotti.map((q) => ({ etichetta: q.nome, valore: q.livello })));
+      prodotto = prodotti.find((p) => p.livello === scelto) ?? null;
+    }
+    if (!prodotto) return false;
+    r.livelliEffettivi = prodotto.livello;
+    mem.set("am.lidarLivello", prodotto.livello);
+  } else {
+    toast("Leggo i livelli del servizio…");
+    r.livelliEffettivi = await risolviLivelli({ scegli: /lidar|dtm|dsm|ombr|hillshade/i }, r.urlEffettivo);
+  }
+  mem.set("am.lidarRegione", regione);
+  r.stato = `${nomeRegione(regione)}${prodotto ? " – " + prodotto.nome.replace(/ \(consigliato\)/, "") : ""}`;
+  return true;
+}
+
+/** Per la scheda Rilievo: indirizzo e livello del LiDAR scelto nei Livelli (lo chiede se manca). */
+async function sorgenteLidar() {
+  const r = sovr.get("lidar");
+  if (!r) return null;
+  const scelta = mem.get("am.lidarRegione", null);
+  if (!scelta || !r.livelliEffettivi) {
+    if (!(await sceglieLidar(r))) return null;
+    disegnaSovr();
+  } else {
+    r.urlEffettivo = adattaUrl(urlRegione(r.def, scelta)); // il proxy può essere cambiato
+  }
+  return { base: r.urlEffettivo, livello: r.livelliEffettivi, nome: `LiDAR ${r.stato}` };
+}
+
+/** Testo «Marche – DTM 1 m» della scelta salvata, senza chiedere nulla. */
+function fonteLidar() {
+  const regione = mem.get("am.lidarRegione", null);
+  if (!regione) return "";
+  const d = sovr.get("lidar")?.def;
+  const livello = mem.get("am.lidarLivello", null);
+  const p = d ? prodottiRegione(d, regione).find((x) => x.livello === livello) : null;
+  return `${nomeRegione(regione)}${p ? " – " + p.nome.replace(/ \(consigliato\)/, "") : ""}`;
+}
+
+async function cambiaFonteLidar() {
+  const r = sovr.get("lidar");
+  if (r) await cambiaRegione(r);
+}
+
 async function costruisciLivelloSovr(r) {
   const d = r.def;
   if (d.tipo === "wms-regione") {
-    const regione = mem.get("am.lidarRegione", null) ?? (await scegli("Scegli la regione", elencoRegioni(d)));
-    if (!regione) return null;
-    r.urlEffettivo = adattaUrl(urlRegione(d, regione));
-    const prodotti = prodottiRegione(d, regione);
-    let prodotto = null;
-    if (prodotti.length) {
-      const salvato = mem.get("am.lidarLivello", null);
-      prodotto = prodotti.find((p) => p.livello === salvato) ?? (prodotti.length === 1 ? prodotti[0] : null);
-      if (!prodotto) {
-        const scelto = await scegli("Quale livello?", prodotti.map((q) => ({ etichetta: q.nome, valore: q.livello })));
-        prodotto = prodotti.find((p) => p.livello === scelto) ?? null;
-      }
-      if (!prodotto) return null;
-      r.livelliEffettivi = prodotto.livello;
-      mem.set("am.lidarLivello", prodotto.livello);
-    } else {
-      toast("Leggo i livelli del servizio…");
-      r.livelliEffettivi = await risolviLivelli({ scegli: /lidar|dtm|dsm|ombr|hillshade/i }, r.urlEffettivo);
-    }
-    mem.set("am.lidarRegione", regione);
-    r.stato = `${nomeRegione(regione)}${prodotto ? " – " + prodotto.nome.replace(/ \(consigliato\)/, "") : ""}`;
+    if (!(await sceglieLidar(r))) return null;
   } else if (d.tipo === "wms" && !r.livelliEffettivi) {
     toast("Leggo i livelli del servizio…");
     r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
@@ -228,6 +267,8 @@ async function costruisciLivelloSovr(r) {
   layer.setOpacity(r.opacita);
   layer.setZIndex(++zCont);
   if (d.tipo !== "tile") {
+    r.ok = 0; r.nativo = 0; r.messaggio = "";
+    aggiungiRipiegoNativo(layer, { win: window, stato: r });
     layer.on("tileerror", () => {
       if (++r.errori === 4) toast(messaggioTessere(r), 9000);
     });
@@ -356,6 +397,42 @@ function disegnaSovr() {
       );
     }),
   );
+}
+
+/** «Perché non si vede?»: prova una tessera di ogni livello acceso e racconta che cosa risponde il servizio. */
+async function diagnosiLivelli() {
+  const btn = $("btnDiag");
+  const box = $("diagMsg");
+  occupato(btn, true);
+  try {
+    const attivi = [...sovr.values()].filter((r) => r.on && r.layer && r.def.tipo !== "tile");
+    if (!attivi.length) {
+      box.replaceChildren(h("p", { class: "hint" }, "Accendi prima un livello del Ministero (per esempio il LiDAR) e poi tocca di nuovo."));
+      return;
+    }
+    box.replaceChildren(h("p", { class: "hint" }, "Provo una tessera al centro della mappa…"));
+    const centro = map.getCenter();
+    const schede = [];
+    for (const r of attivi) {
+      const z = Math.min(map.getZoom(), r.def.maxNativeZoom ?? 19);
+      const p = map.project(centro, z).divideBy(256).floor();
+      const coords = L.point(p.x, p.y);
+      coords.z = z;
+      const e = await provaTessera({ url: r.layer.getTileUrl(coords), win: window });
+      schede.push(h("div", { class: "card" },
+        h("div", { class: "pt" }, `${r.def.nome}${r.stato ? " – " + r.stato : ""}`),
+        h("div", { class: e.ok ? "pm" : "pm stato ko" }, e.ok ? `Risponde: ${e.dettaglio}.` : `Non risponde bene: ${e.dettaglio}.`),
+        h("div", { class: "hint" }, `Prova fatta con: ${e.via}. Tessere mostrate finora: ${r.ok ?? 0}${r.nativo ? ` (${r.nativo} con il ripiego dell'app)` : ""}; errori consecutivi: ${r.errori}.${r.messaggio ? " Ultimo messaggio: " + r.messaggio + "." : ""}`),
+        e.miniatura ? h("img", { src: e.miniatura, alt: "Tessera ricevuta dal servizio", width: "96", height: "96", style: "background:#888;border:1px solid #666;margin:4px 0" }) : null,
+        h("details", null, h("summary", null, "Indirizzo provato"), h("code", { style: "word-break:break-all;font-size:11px" }, e.url)),
+      ));
+    }
+    box.replaceChildren(...schede);
+  } catch (e) {
+    box.replaceChildren(h("p", { class: "hint" }, `Prova non riuscita: ${messaggioErrore(e)}`));
+  } finally {
+    occupato(btn, false);
+  }
 }
 
 async function verificaServizi() {
@@ -1081,7 +1158,7 @@ function avvia() {
   aggiornaRete();
   rilievo = iniziaRilievo({
     map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro: () => centro, impostaCentro,
-    fmtCoord, gen, pubblica, metaEsportazione, nomeFile,
+    fmtCoord, gen, pubblica, metaEsportazione, nomeFile, sorgenteLidar, fonteLidar, cambiaFonteLidar,
     cerchio: (km) => { if (schedaAttiva === "relief") { raggioCerchioKm = km; aggiornaCerchio(); } },
   });
 
@@ -1095,6 +1172,7 @@ function avvia() {
   });
   $("zonesExtra").addEventListener("change", () => { if (ultimeZone) disegnaZone(ultimeZone.res, $("zonesExtra").checked); });
   $("btnProbe").addEventListener("click", verificaServizi);
+  $("btnDiag").addEventListener("click", diagnosiLivelli);
   $("btnNear").addEventListener("click", cercaDintorni);
   $("btnNearGeo").addEventListener("click", () => esportaDintorni("geo"));
   $("btnNearCsv").addEventListener("click", () => esportaDintorni("csv"));

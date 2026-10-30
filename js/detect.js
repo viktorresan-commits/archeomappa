@@ -31,11 +31,11 @@ export function impostazioniPredefinite(cella) {
 }
 
 /** Elenco leggibile delle regole applicate, da mostrare e da salvare con i risultati. */
-export function descriviRegole(imp, cella, soglia) {
+export function descriviRegole(imp, cella, soglia, unita = "m") {
   const m = (v) => `${Math.round(v)} m`;
   const r = [
     `Rilievo locale: quota meno quota di fondo su scala ${m(imp.scalaFondoM)}.`,
-    `Contrasto minimo: ${soglia != null ? soglia.toFixed(2).replace(".", ",") + " m" : "automatico"}${imp.contrastoM == null ? ` (${String(imp.kSigma).replace(".", ",")} volte la variabilità del rilievo)` : " (impostato a mano)"}.`,
+    `Contrasto minimo: ${soglia != null ? soglia.toFixed(2).replace(".", ",") + " " + unita : "automatico"}${imp.contrastoM == null ? ` (${String(imp.kSigma).replace(".", ",")} volte la variabilità del rilievo)` : " (impostato a mano)"}.`,
     `Ricucitura di frammenti vicini: ${m(imp.chiusuraM)}.`,
     `Confidenza minima: ${Math.round(imp.confidenzaMin * 100)}%.`,
   ];
@@ -359,7 +359,7 @@ export function rileva(g, imp, esterni = {}) {
   out.sigma = st.sigma;
   const soglia = imp.contrastoM != null ? imp.contrastoM : Math.max(0.05, imp.kSigma * st.sigma);
   out.soglia = soglia;
-  out.regole = descriviRegole(imp, cella, soglia);
+  out.regole = descriviRegole(imp, cella, soglia, g.unita ?? "m");
 
   let mask = new Uint8Array(w * h);
   for (let i = 0; i < mask.length; i++) mask[i] = valido[i] && Math.abs(L[i]) > soglia ? 1 : 0;
@@ -453,7 +453,8 @@ export function rileva(g, imp, esterni = {}) {
   return out;
 }
 
-export function anomalieInGeoJSON(anomalie, meta = {}) {
+export function anomalieInGeoJSON(anomalie, meta = {}, unita = "m") {
+  const chiaveContrasto = unita === "m" ? "contrasto_m" : "contrasto_livelli"; // livelli di grigio relativi: non sono metri
   return {
     type: "FeatureCollection",
     properties: meta,
@@ -461,7 +462,7 @@ export function anomalieInGeoJSON(anomalie, meta = {}) {
       type: "Feature",
       properties: {
         id: a.id, tipo: a.tipo, codice: a.codice, confidenza: Number(a.punteggio.toFixed(3)), polarita: a.polarita,
-        dimensione_m: Math.round(a.dimensioneM), area_m2: Math.round(a.areaM2), contrasto_m: Number(a.contrastoM.toFixed(2)),
+        dimensione_m: Math.round(a.dimensioneM), area_m2: Math.round(a.areaM2), [chiaveContrasto]: Number(a.contrastoM.toFixed(2)),
         sito_noto_piu_vicino_m: a.sitoNotoM == null ? null : Math.round(a.sitoNotoM), tagliata_dal_bordo: a.tagliata,
         centro_lat: Number(a.lat.toFixed(6)), centro_lon: Number(a.lon.toFixed(6)),
       },

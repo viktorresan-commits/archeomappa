@@ -64,6 +64,10 @@
             <button id="btnProbe" type="button" class="btn">Verifica servizi</button>
             <span id="probeMsg" class="hint"></span>
           </div>
+          <div class="row">
+            <button id="btnDiag" type="button" class="btn">Perché non si vede?</button>
+          </div>
+          <div id="diagMsg" role="status" aria-live="polite"></div>
 
           <details class="box" id="boxProxy">
             <summary>Servizi del Ministero (LiDAR, ortofoto): proxy</summary>
@@ -150,31 +154,42 @@
         <!-- RILIEVO -->
         <div id="panel-relief" class="panel" role="tabpanel" hidden>
           <h2>Rilievo LiDAR e anomalie</h2>
-          <p class="hint">Carica un modello digitale del terreno (DTM) in GeoTIFF o ASCII Grid. Il file resta sul dispositivo: viene letto qui, non inviato a nessuno. L'app lo mostra in varie visualizzazioni e cerca recinti, tumuli e tracciati dalla forma del terreno.</p>
-          <details class="box">
-            <summary>Dove trovo un file LiDAR?</summary>
-            <p><strong>PST, Ministero dell'Ambiente</strong> (LiDAR ad alta risoluzione, copertura parziale). Meglio da computer:</p>
-            <ol class="plain">
-              <li>Apri il <a href="https://sim.mase.gov.it/portalediaccesso/mappe/#/viewer/new" target="_blank" rel="noopener noreferrer">portale del Geoportale</a>.</li>
-              <li>«Aggiungi livello», scegli il servizio LIDAR e tocca «+» accanto alla griglia.</li>
-              <li>«Seleziona area», disegna un poligono attorno alla zona e aggiungi i dati al carrello.</li>
-              <li>Nel carrello scegli il DTM (non il DSM) e «Scarica tutto».</li>
-              <li>Ricevi uno ZIP: scompattalo e carica qui il file <code>.tif</code>. Va bene sia WGS84 (EPSG:4326) sia UTM.</li>
-            </ol>
-            <p class="hint">Licenza indicata: CC BY 4.0 (cita la fonte). Controlla la risoluzione nel catalogo: serve 1–2 m per tumuli e piccoli forti.</p>
-            <p><strong>TINITALY, INGV</strong>: tutta Italia a 10 m, GeoTIFF in UTM 32N. Adatto a provare, non a vedere strutture piccole. <a href="https://tinitaly.pi.ingv.it/Download_Area1_1.html" target="_blank" rel="noopener noreferrer">Pagina di scarico</a>. Licenza CC BY 4.0: cita Tarquini et al. (2023), TINITALY 1.1, INGV, doi:10.13127/tinitaly/1.1.</p>
-            <p class="hint">Se il file è molto grande, ritaglialo prima con QGIS («Ritaglia raster per estensione») e salvalo in GeoTIFF.</p>
-          </details>
-          <label class="field">File del rilievo (.tif, .tiff, .asc)
-            <input id="relFile" type="file" accept=".tif,.tiff,.asc,.txt,.grd,image/tiff">
-          </label>
-          <div id="relCrsBox" hidden>
-            <label class="field">Sistema di coordinate del file
-              <select id="relEpsg"></select>
-            </label>
-            <p class="hint">Serve per i file ASCII, che non lo dichiarano, e per i GeoTIFF dove non è leggibile. Gauss-Boaga non è supportato: riproietta il file in UTM con QGIS.</p>
-            <div class="row"><button id="btnRelApri" type="button" class="btn">Riapri con questo sistema</button></div>
+          <p class="hint">L'app prende il LiDAR dal servizio del Geoportale nazionale, attorno al centro che scegli sulla mappa, lo mostra in varie visualizzazioni e cerca recinti, tumuli e tracciati dalla forma del terreno. Non devi caricare nessun file.</p>
+          <div class="box" id="relFonteBox">
+            <div class="pt">Fonte: LiDAR del servizio</div>
+            <p id="relFonte" class="hint"></p>
+            <div class="row"><button id="btnRelFonte" type="button" class="btn">Scegli regione e livello</button></div>
+            <p class="hint">Il servizio dà un'immagine a 256 livelli di grigio, non le quote. L'app la confronta con alcune quote vere del servizio: se i valori tornano, li converte in metri; altrimenti li lascia come livelli relativi e te lo dice. Servono internet e l'app Android (dal sito serve il proxy, vedi Livelli).</p>
           </div>
+          <details class="box" id="relFileBox">
+            <summary>Avanzate: usare un mio file invece del servizio</summary>
+            <p class="hint">Facoltativo. Un DTM in GeoTIFF o ASCII Grid resta sul dispositivo: viene letto qui, non inviato a nessuno.</p>
+            <details class="box">
+              <summary>Dove trovo un file LiDAR?</summary>
+              <p><strong>PST, Ministero dell'Ambiente</strong> (LiDAR ad alta risoluzione, copertura parziale). Meglio da computer:</p>
+              <ol class="plain">
+                <li>Apri il <a href="https://sim.mase.gov.it/portalediaccesso/mappe/#/viewer/new" target="_blank" rel="noopener noreferrer">portale del Geoportale</a>.</li>
+                <li>«Aggiungi livello», scegli il servizio LIDAR e tocca «+» accanto alla griglia.</li>
+                <li>«Seleziona area», disegna un poligono attorno alla zona e aggiungi i dati al carrello.</li>
+                <li>Nel carrello scegli il DTM (non il DSM) e «Scarica tutto».</li>
+                <li>Ricevi uno ZIP: scompattalo e carica qui il file <code>.tif</code>. Va bene sia WGS84 (EPSG:4326) sia UTM.</li>
+              </ol>
+              <p class="hint">Licenza indicata: CC BY 4.0 (cita la fonte). Controlla la risoluzione nel catalogo: serve 1–2 m per tumuli e piccoli forti.</p>
+              <p><strong>TINITALY, INGV</strong>: tutta Italia a 10 m, GeoTIFF in UTM 32N. Adatto a provare, non a vedere strutture piccole. <a href="https://tinitaly.pi.ingv.it/Download_Area1_1.html" target="_blank" rel="noopener noreferrer">Pagina di scarico</a>. Licenza CC BY 4.0: cita Tarquini et al. (2023), TINITALY 1.1, INGV, doi:10.13127/tinitaly/1.1.</p>
+              <p class="hint">Se il file è molto grande, ritaglialo prima con QGIS («Ritaglia raster per estensione») e salvalo in GeoTIFF.</p>
+            </details>
+            <label class="field">File del rilievo (.tif, .tiff, .asc)
+              <input id="relFile" type="file" accept=".tif,.tiff,.asc,.txt,.grd,image/tiff">
+            </label>
+            <div id="relCrsBox" hidden>
+              <label class="field">Sistema di coordinate del file
+                <select id="relEpsg"></select>
+              </label>
+              <p class="hint">Serve per i file ASCII, che non lo dichiarano, e per i GeoTIFF dove non è leggibile. Gauss-Boaga non è supportato: riproietta il file in UTM con QGIS.</p>
+              <div class="row"><button id="btnRelApri" type="button" class="btn">Riapri con questo sistema</button></div>
+            </div>
+            <div class="row"><button id="btnRelServizio" type="button" class="btn" hidden>Torna al LiDAR del servizio</button></div>
+          </details>
           <div id="relInfo" class="relinfo"></div>
 
           <label class="field">Raggio di analisi: <output id="relRadiusOut">1 km</output>
@@ -195,8 +210,8 @@
             <input id="relOpacity" type="range" min="20" max="100" step="5" value="75">
           </label>
           <div class="row">
-            <button id="btnRelShow" type="button" class="btn primary" disabled>Mostra il rilievo</button>
-            <button id="btnRelFind" type="button" class="btn primary" disabled>Cerca anomalie</button>
+            <button id="btnRelShow" type="button" class="btn primary">Mostra il rilievo</button>
+            <button id="btnRelFind" type="button" class="btn primary">Cerca anomalie</button>
           </div>
           <p id="relModeNote" class="hint" hidden>Nella modalità pubblica il rilevatore di anomalie è disattivato.</p>
           <p id="relStatus" class="status" role="status"></p>

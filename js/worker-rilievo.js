@@ -8,6 +8,8 @@ self.onmessage = async (ev) => {
   try {
     if (op === "apri") {
       self.postMessage({ id, ok: true, risultato: await sessione.apri(dati.file, dati.opzioni) });
+    } else if (op === "apriPixel") {
+      self.postMessage({ id, ok: true, risultato: await sessione.apriPixel(dati) });
     } else if (op === "analizza") {
       const r = await sessione.analizza(dati, (testo) => self.postMessage({ id, avanzamento: testo }));
       self.postMessage({ id, ok: true, risultato: r }, r.immagine ? [r.immagine.rgba.buffer] : []);

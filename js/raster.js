@@ -437,7 +437,7 @@ async function apriAscii(blob, opzioni) {
 }
 
 /** Aggiunge copertura geografica e dimensione del pixel in metri. */
-function completaMeta(meta) {
+export function completaMeta(meta) {
   const { origine, pixel, larghezza: W, altezza: H, proiezione } = meta;
   const angoli = [[0, 0], [W, 0], [W, H], [0, H]].map(([c, r]) => proiezione.aLatLon(origine.x + c * pixel.dx, origine.y - r * pixel.dy));
   const lats = angoli.map((a) => a[0]), lons = angoli.map((a) => a[1]);
