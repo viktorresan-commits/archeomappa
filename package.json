@@ -1,0 +1,11 @@
+{
+  "name": "archeomappa-italia",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Prototipo PWA: mappa del potenziale archeologico per l'Italia",
+  "scripts": {
+    "test": "node tests/test.mjs && node tests/test-raster.mjs && node tests/test-visual.mjs && node tests/test-detect.mjs && node tests/test-analisi.mjs",
+    "test:rapidi": "node tests/test.mjs && node tests/test-visual.mjs"
+  }
+}

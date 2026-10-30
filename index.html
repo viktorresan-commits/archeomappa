@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ArcheoMappa Italia</title>
+  <meta name="description" content="Prototipo di mappa del potenziale archeologico per l'Italia: livelli cartografici, ricerca nei dintorni, zone di potenziale e fonti storiche.">
+  <meta name="theme-color" content="#1f3a2e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ArcheoMappa">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <div class="mapwrap">
+      <header class="topbar">
+        <form id="searchForm" class="search" role="search">
+          <input id="searchInput" type="search" placeholder="Cerca un luogo o scrivi le coordinate" aria-label="Cerca un luogo o scrivi le coordinate" autocomplete="off" enterkeyhint="search">
+          <button type="submit" class="iconbtn" aria-label="Cerca">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </form>
+        <button id="btnLocate" type="button" class="iconbtn round" aria-label="Vai alla mia posizione">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <span id="netBadge" class="netbadge" hidden>Senza connessione</span>
+      </header>
+      <div id="map" aria-label="Mappa"></div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <section id="sheet" class="sheet" data-state="half" aria-label="Strumenti">
+      <button id="grip" type="button" class="grip" aria-label="Ingrandisci o riduci il pannello"><span></span></button>
+      <nav id="tabs" class="tabs" role="tablist" aria-label="Sezioni">
+        <button type="button" role="tab" data-tab="layers" aria-selected="true">Livelli</button>
+        <button type="button" role="tab" data-tab="near" aria-selected="false">Dintorni</button>
+        <button type="button" role="tab" data-tab="zones" aria-selected="false">Zone</button>
+        <button type="button" role="tab" data-tab="relief" aria-selected="false">Rilievo</button>
+        <button type="button" role="tab" data-tab="library" aria-selected="false">Fonti</button>
+        <button type="button" role="tab" data-tab="info" aria-selected="false">Info</button>
+      </nav>
+      <div class="centerbar">
+        <span id="centerText">Centro: non impostato. Tocca la mappa.</span>
+        <button id="btnCenterMap" type="button" class="link">Usa il centro della mappa</button>
+      </div>
+
+      <div class="panels">
+        <!-- LIVELLI -->
+        <div id="panel-layers" class="panel" role="tabpanel">
+          <h2>Mappa di base</h2>
+          <div id="baseList" class="optlist"></div>
+
+          <h2>Livelli sovrapposti</h2>
+          <div id="overlayList" class="optlist"></div>
+          <div class="row">
+            <button id="btnProbe" type="button" class="btn">Verifica servizi</button>
+            <span id="probeMsg" class="hint"></span>
+          </div>
+
+          <details class="box">
+            <summary>Aggiungi un servizio WMS</summary>
+            <label class="field">Servizi noti
+              <select id="wmsKnown"></select>
+            </label>
+            <label class="field">Indirizzo del servizio
+              <input id="wmsUrl" type="url" inputmode="url" placeholder="https://…/wms" autocomplete="off">
+            </label>
+            <div class="row">
+              <button id="btnCaps" type="button" class="btn">Leggi i livelli</button>
+              <a id="capsLink" class="link" href="#" target="_blank" rel="noopener noreferrer" hidden>Apri il GetCapabilities</a>
+            </div>
+            <div id="wmsLayers" hidden>
+              <label class="field">Livello
+                <select id="capsList"></select>
+              </label>
+            </div>
+            <label class="field">Nome del livello, se non è elencato
+              <input id="wmsManual" type="text" placeholder="Nome tecnico del livello" autocomplete="off">
+            </label>
+            <label class="field">Nome da mostrare
+              <input id="wmsName" type="text" placeholder="Es. Catasto" autocomplete="off">
+            </label>
+            <div class="row">
+              <button id="btnAddWms" type="button" class="btn primary">Aggiungi alla mappa</button>
+            </div>
+            <p id="wmsMsg" class="hint" role="status"></p>
+          </details>
+        </div>
+
+        <!-- DINTORNI -->
+        <div id="panel-near" class="panel" role="tabpanel" hidden>
+          <h2>Cerca nei dintorni</h2>
+          <p class="hint">Castelli, rovine e strutture storiche già censite in OpenStreetMap attorno al centro.</p>
+          <label class="field">Raggio: <output id="nearRadiusOut">5 km</output>
+            <input id="nearRadius" type="range" min="1" max="30" step="1" value="5">
+          </label>
+          <fieldset class="checks"><legend>Cosa cercare</legend><div id="nearCats"></div></fieldset>
+          <div class="row">
+            <button id="btnNear" type="button" class="btn primary">Cerca</button>
+          </div>
+          <p id="nearStatus" class="status" role="status"></p>
+          <div id="nearFilters" class="chips"></div>
+          <ul id="nearList" class="results"></ul>
+          <div class="row">
+            <button id="btnNearGeo" type="button" class="btn" disabled>Scarica GeoJSON</button>
+            <button id="btnNearCsv" type="button" class="btn" disabled>Scarica CSV</button>
+          </div>
+        </div>
+
+        <!-- ZONE -->
+        <div id="panel-zones" class="panel" role="tabpanel" hidden>
+          <h2>Zone di potenziale</h2>
+          <p class="hint">Triangola i siti noti attorno al centro e segnala gli spazi fra loro dove la presenza umana storica è più probabile. È un'ipotesi da verificare, non una scoperta.</p>
+          <label class="field">Raggio: <output id="zonesRadiusOut">5 km</output>
+            <input id="zonesRadius" type="range" min="1" max="10" step="1" value="5">
+          </label>
+          <label class="check"><input id="zonesExtra" type="checkbox"> Mostra anche la rete di triangoli</label>
+          <div class="row">
+            <button id="btnZones" type="button" class="btn primary">Calcola le zone</button>
+          </div>
+          <p id="zonesStatus" class="status" role="status"></p>
+          <div id="zonesLegend" class="legend"></div>
+          <ol id="zonesTop" class="results"></ol>
+          <div class="row">
+            <button id="btnZonesGeo" type="button" class="btn" disabled>Scarica GeoJSON</button>
+          </div>
+        </div>
+
+        <!-- RILIEVO -->
+        <div id="panel-relief" class="panel" role="tabpanel" hidden>
+          <h2>Rilievo LiDAR e anomalie</h2>
+          <p class="hint">Carica un modello digitale del terreno (DTM) in GeoTIFF o ASCII Grid. Il file resta sul dispositivo: viene letto qui, non inviato a nessuno. L'app lo mostra in varie visualizzazioni e cerca recinti, tumuli e tracciati dalla forma del terreno.</p>
+          <label class="field">File del rilievo (.tif, .tiff, .asc)
+            <input id="relFile" type="file" accept=".tif,.tiff,.asc,.txt,.grd,image/tiff">
+          </label>
+          <div id="relCrsBox" hidden>
+            <label class="field">Sistema di coordinate del file
+              <select id="relEpsg"></select>
+            </label>
+            <p class="hint">Serve per i file ASCII, che non lo dichiarano, e per i GeoTIFF dove non è leggibile. Gauss-Boaga non è supportato: riproietta il file in UTM con QGIS.</p>
+            <div class="row"><button id="btnRelApri" type="button" class="btn">Riapri con questo sistema</button></div>
+          </div>
+          <div id="relInfo" class="relinfo"></div>
+
+          <label class="field">Raggio di analisi: <output id="relRadiusOut">1 km</output>
+            <input id="relRadius" type="range" min="0.25" max="3" step="0.25" value="1">
+          </label>
+          <label class="field">Visualizzazione
+            <select id="relVis"></select>
+          </label>
+          <label class="field">Esagerazione verticale
+            <select id="relEsag">
+              <option value="1">1× (reale)</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+              <option value="5">5×</option>
+            </select>
+          </label>
+          <label class="field">Opacità del rilievo: <output id="relOpacityOut">75%</output>
+            <input id="relOpacity" type="range" min="20" max="100" step="5" value="75">
+          </label>
+          <div class="row">
+            <button id="btnRelShow" type="button" class="btn primary" disabled>Mostra il rilievo</button>
+            <button id="btnRelFind" type="button" class="btn primary" disabled>Cerca anomalie</button>
+          </div>
+          <p id="relModeNote" class="hint" hidden>Nella modalità pubblica il rilevatore di anomalie è disattivato.</p>
+          <p id="relStatus" class="status" role="status"></p>
+
+          <div id="relLegend" class="legend"></div>
+          <ul id="relList" class="results"></ul>
+          <div class="row">
+            <button id="btnRelGeo" type="button" class="btn" disabled>Scarica GeoJSON</button>
+            <button id="btnRelCsv" type="button" class="btn" disabled>Scarica CSV</button>
+          </div>
+          <details class="box">
+            <summary>Regole applicate all'ultima ricerca</summary>
+            <div id="relRules"><p class="hint">Dopo una ricerca qui compare l'elenco esatto delle regole usate.</p></div>
+          </details>
+          <details class="box">
+            <summary>Impostazioni del rilevatore</summary>
+            <div id="relSettings"></div>
+          </details>
+          <details class="box">
+            <summary>Come ragiona il rilevatore e quali limiti ha</summary>
+            <p>Per ogni punto confronta la quota con quella «di fondo» della zona (rilievo locale). Dove il contrasto supera una soglia, raggruppa i punti vicini e ne misura la forma: un contorno chiuso con spazio interno è un candidato recinto, una forma tondeggiante poco allungata è un candidato tumulo o struttura circolare, una striscia lunga e stretta è un candidato aggere, strada o terrazzamento. Scarta ciò che sta su edifici e strade attuali o vicino a siti già noti.</p>
+            <p>Il rilevatore dà ipotesi, non scoperte. Boschi fitti, cave, argini, muri a secco, campi lavorati e rilievi naturali possono produrre falsi positivi, e strutture molto degradate o più piccole del pixel possono sfuggire. Con pixel da 10 m (TINITALY) si vedono solo forme grandi. Le soglie predefinite non sono ancora tarate su dati italiani reali: confronta sempre con ortofoto, fonti e un sopralluogo autorizzato.</p>
+          </details>
+        </div>
+
+        <!-- FONTI -->
+        <div id="panel-library" class="panel" role="tabpanel" hidden>
+          <h2>Biblioteca delle fonti</h2>
+          <p class="hint">Voci di Wikipedia, immagini di Wikimedia Commons, testi di Internet Archive ed Europeana (con chiave) su un luogo o attorno al centro.</p>
+          <label class="field">Argomento o luogo
+            <input id="libQuery" type="search" placeholder="Es. Tarquinia necropoli" autocomplete="off">
+          </label>
+          <div class="row">
+            <button id="btnLib" type="button" class="btn primary">Cerca</button>
+            <button id="btnLibPin" type="button" class="btn">Vicino al centro</button>
+          </div>
+          <label class="check"><input id="libForce" type="checkbox"> Ignora i risultati già salvati</label>
+          <p id="libStatus" class="status" role="status"></p>
+          <div id="libChips" class="chips"></div>
+          <div id="libProfile" class="profile"></div>
+          <label class="check"><input id="libHide" type="checkbox"> Nascondi i risultati senza indizi di epoca</label>
+          <ul id="libList" class="results"></ul>
+          <div class="row">
+            <button id="btnLibJson" type="button" class="btn" disabled>Scarica JSON</button>
+            <button id="btnLibCsv" type="button" class="btn" disabled>Scarica CSV</button>
+          </div>
+        </div>
+
+        <!-- INFO -->
+        <div id="panel-info" class="panel" role="tabpanel" hidden>
+          <h2>Che cos'è</h2>
+          <p>Prototipo di ricerca e sviluppo per una mappa del potenziale archeologico italiano, pensato per essere ceduto all'ufficio di archeologia competente. Non serve a scavare e non indica dove scavare.</p>
+          <div class="row">
+            <button id="btnFound" type="button" class="btn warn">Segnala un ritrovamento fortuito</button>
+          </div>
+          <div class="row">
+            <button id="btnInstall" type="button" class="btn primary" hidden>Installa l'app</button>
+          </div>
+          <p id="iosHint" class="hint" hidden>Su iPhone e iPad: tocca Condividi, poi «Aggiungi alla schermata Home».</p>
+
+          <details class="box" open>
+            <summary>Accesso ai dati</summary>
+            <label class="field">Modalità
+              <select id="setMode">
+                <option value="ente">Ente: coordinate esatte, tutti i livelli</option>
+                <option value="pubblica">Pubblica: posizioni generalizzate a circa 1 km</option>
+              </select>
+            </label>
+            <p class="hint">Nella modalità pubblica le posizioni mostrate ed esportate sono arrotondate e le zone di potenziale restano disattivate. L'ente decide quale modalità adottare.</p>
+          </details>
+
+          <details class="box">
+            <summary>Parametri delle zone</summary>
+            <label class="field">Siti vicini: <output id="wNearOut">30</output>
+              <input id="wNear" type="range" min="0" max="100" value="30"></label>
+            <label class="field">Distanza media dai 5 siti più vicini: <output id="wMeanOut">25</output>
+              <input id="wMean" type="range" min="0" max="100" value="25"></label>
+            <label class="field">Regolarità del triangolo: <output id="wTriOut">25</output>
+              <input id="wTri" type="range" min="0" max="100" value="25"></label>
+            <label class="field">Densità dei siti: <output id="wDensOut">20</output>
+              <input id="wDens" type="range" min="0" max="100" value="20"></label>
+            <label class="field">Soglia minima (0–1)
+              <input id="setLow" type="number" min="0" max="1" step="0.05" value="0.25"></label>
+            <label class="field">Soglia di potenziale alto (0–1)
+              <input id="setHigh" type="number" min="0" max="1" step="0.05" value="0.55"></label>
+            <label class="field">Distanza minima da un sito noto (m)
+              <input id="setBuffer" type="number" min="0" max="3000" step="50" value="700"></label>
+            <p class="hint">I pesi vengono normalizzati: conta il rapporto fra loro, non la somma.</p>
+          </details>
+
+          <details class="box">
+            <summary>Chiavi e dati salvati</summary>
+            <label class="field">Chiave API Europeana (facoltativa)
+              <input id="setEuropeana" type="text" autocomplete="off" spellcheck="false" placeholder="Incolla la chiave"></label>
+            <div class="row">
+              <button id="btnResetSettings" type="button" class="btn">Ripristina le impostazioni</button>
+              <button id="btnClearCache" type="button" class="btn">Svuota i dati salvati</button>
+            </div>
+          </details>
+
+          <details class="box">
+            <summary>Come funziona e quali limiti ha</summary>
+            <p>Le zone nascono da una triangolazione di Delaunay dei siti noti. Ogni triangolo riceve un punteggio da quattro fattori: quanti siti ha vicino, la distanza media dai più vicini, la regolarità della forma e la densità attorno. Sono scartate le aree troppo vicine a un sito già noto e quelle sotto soglia. Nel dubbio la zona non viene proposta.</p>
+            <p>I siti noti arrivano da OpenStreetMap, che è incompleto e volontario: non sostituisce il Catalogo Generale dei Beni Culturali né i vincoli ufficiali. L'epoca è stimata dalle parole del testo e può essere sbagliata o mancare.</p>
+            <p>Non sono ancora presenti: punteggio da idrografia, edifici scomparsi, dati LiDAR scaricati direttamente dall'app (oggi il file va caricato a mano).</p>
+          </details>
+
+          <details class="box">
+            <summary>Fonti e licenze</summary>
+            <ul class="plain">
+              <li>Mappe e siti: © collaboratori di OpenStreetMap (ODbL)</li>
+              <li>Rilievo di base: OpenTopoMap, Esri. DTM caricati dall'utente (es. TINITALY, INGV, CC BY 4.0; PST, MASE): vale la licenza del file</li>
+              <li>Voci e immagini: Wikipedia e Wikimedia Commons, licenze indicate caso per caso</li>
+              <li>Testi: Internet Archive; oggetti: Europeana</li>
+              <li>Servizi WMS: Geoportale Nazionale (MASE), Agenzia delle Entrate, secondo le rispettive licenze</li>
+            </ul>
+          </details>
+          <p class="hint">Versione <span id="appVersion"></span></p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="legalDialog" class="dialog">
+    <h2>Prima di cominciare</h2>
+    <p>Questo strumento è un prototipo di ricerca. Le ricerche archeologiche sul terreno sono riservate allo Stato e possono essere svolte solo con concessione o autorizzazione (D.Lgs. 42/2004, artt. 88 e 89). La ricerca di beni archeologici senza autorizzazione è punita dalla legge.</p>
+    <p>Le zone di potenziale sono ipotesi di studio: non confermano la presenza di nulla. Se trovi qualcosa, non toccarlo e usa «Segnala un ritrovamento fortuito» nella sezione Info.</p>
+    <div class="row"><button id="btnLegalOk" type="button" class="btn primary">Ho capito</button></div>
+  </dialog>
+
+  <dialog id="foundDialog" class="dialog">
+    <h2>Ritrovamento fortuito</h2>
+    <p>Chi scopre per caso beni culturali ne dà denuncia entro 24 ore alla Soprintendenza competente, al sindaco o alle forze dell'ordine, e ne assicura la conservazione temporanea senza rimuoverli dal luogo (D.Lgs. 42/2004, art. 90: verifica sempre il testo vigente).</p>
+    <p>Non scavare, non spostare nulla, non pubblicare la posizione esatta. Per le emergenze puoi chiamare il 112.</p>
+    <p id="foundCoords" class="mono"></p>
+    <div class="row">
+      <button id="btnCopyCoords" type="button" class="btn">Copia le coordinate</button>
+      <button id="btnFoundClose" type="button" class="btn primary">Chiudi</button>
+    </div>
+  </dialog>
+
+  <dialog id="chooserDialog" class="dialog">
+    <h2 id="chooserTitle">Scegli</h2>
+    <div id="chooserList" class="optlist"></div>
+    <div class="row"><button id="btnChooserCancel" type="button" class="btn">Annulla</button></div>
+  </dialog>
+
+  <noscript><p style="padding:1rem">ArcheoMappa richiede JavaScript.</p></noscript>
+</body>
+</html>
