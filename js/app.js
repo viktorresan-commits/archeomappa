@@ -9,14 +9,14 @@ import {
   wikipediaVicino, wikipediaCerca, commonsCerca, commonsVicino, archiveCerca, europeanaCerca,
 } from "./sources.js";
 import {
-  BASI, SOVRAPPOSIZIONI, SERVIZI_NOTI, creaLivello, risolviLivelli, provaServizio, urlRegione, prodottiRegione,
-  ambiente, normalizzaProxy, urlPerAmbiente, usaPcn,
+  BASI, SOVRAPPOSIZIONI, SERVIZI_NOTI, creaLivello, risolviLivelli, urlRegione, prodottiRegione,
+  ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlTessera, tesseraDa,
 } from "./layers.js";
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
 import { aggiungiRipiegoNativo, provaTessera } from "./tessere.js";
 
-const VERSIONE = "0.3.0";
+const VERSIONE = "0.3.1";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -165,6 +165,7 @@ function registraSovr(def) {
     opacita: s.opacita ?? def.opacita ?? 1,
     wantOn: !!s.on,
     stato: def.daVerificare ? "da verificare" : "",
+    salute: "", // esito dell'ultima verifica: «risponde», «non risponde», «non verificabile»
     errori: 0,
     urlEffettivo: adattaUrl(def.url),
     livelliEffettivi: def.livelli,
@@ -255,13 +256,49 @@ async function cambiaFonteLidar() {
   if (r) await cambiaRegione(r);
 }
 
+/** Livello di un servizio che ne elenca più d'uno (come l'IGM, uno per fuso): usa la scelta salvata o la chiede. */
+async function sceglieLivelloWms(r) {
+  const chiave = "am.livello." + r.def.id;
+  const salvato = mem.get(chiave, null);
+  if (salvato) { r.livelliEffettivi = salvato; return true; }
+  toast("Leggo i livelli del servizio…");
+  const cap = await caricaCapabilities(r.urlEffettivo);
+  let scelto = cap.livelli[0]?.name;
+  if (cap.livelli.length > 1) {
+    scelto = await scegli("Quale livello?", cap.livelli.map((l) => ({ etichetta: l.title && l.title !== l.name ? `${l.title} (${l.name})` : l.name, valore: l.name })));
+  }
+  if (!scelto) return false;
+  mem.set(chiave, scelto);
+  r.livelliEffettivi = scelto;
+  r.stato = scelto;
+  return true;
+}
+
+async function cambiaLivelloWms(r) {
+  if (r.layer) map.removeLayer(r.layer);
+  r.layer = null;
+  r.on = false;
+  r.livelliEffettivi = undefined;
+  r.stato = "";
+  r.salute = "";
+  mem.del("am.livello." + r.def.id);
+  disegnaSovr();
+  const cb = $("ov-" + r.def.id);
+  cb.checked = true;
+  await alternaSovr(r, cb);
+}
+
 async function costruisciLivelloSovr(r) {
   const d = r.def;
   if (d.tipo === "wms-regione") {
     if (!(await sceglieLidar(r))) return null;
   } else if (d.tipo === "wms" && !r.livelliEffettivi) {
-    toast("Leggo i livelli del servizio…");
-    r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
+    if (d.scegliLivello) {
+      if (!(await sceglieLivelloWms(r))) return null;
+    } else {
+      toast("Leggo i livelli del servizio…");
+      r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
+    }
   }
   const layer = creaLivello(L, d, { url: r.urlEffettivo, livelli: r.livelliEffettivi });
   layer.setOpacity(r.opacita);
@@ -332,8 +369,9 @@ function riapplicaProxy() {
     r.layer = null;
     r.on = false;
     r.errori = 0;
+    r.salute = "";
     r.urlEffettivo = adattaUrl(r.def.url);
-    r.livelliEffettivi = r.def.livelli;
+    r.livelliEffettivi = r.def.scegliLivello ? mem.get("am.livello." + r.def.id, undefined) : r.def.livelli;
   }
   disegnaSovr();
   for (const r of daRiaccendere) {
@@ -378,11 +416,12 @@ function disegnaSovr() {
       const id = "ov-" + r.def.id;
       const cb = h("input", { type: "checkbox", id, checked: r.on ? true : null });
       cb.addEventListener("change", () => alternaSovr(r, cb));
-      const classe = r.stato === "risponde" ? "stato ok" : r.stato === "non risponde" ? "stato ko" : "stato";
+      const classeSalute = r.salute === "risponde" ? "stato ok" : r.salute === "non risponde" ? "stato ko" : "stato";
       return h("div", { class: "opt" },
         h("label", { for: id }, cb,
           h("span", null, r.def.nome, r.def.nota ? h("span", { class: "nota" }, r.def.nota) : null)),
-        r.stato ? h("span", { class: classe }, r.stato) : null,
+        r.stato ? h("span", { class: r.stato === "non risponde" ? "stato ko" : "stato" }, r.stato) : null,
+        r.salute ? h("span", { class: classeSalute }, r.salute) : null,
         r.on
           ? h("input", {
               type: "range", min: "0.1", max: "1", step: "0.05", value: String(r.opacita), "aria-label": `Trasparenza di ${r.def.nome}`,
@@ -394,78 +433,86 @@ function disegnaSovr() {
         r.def.tipo === "wms-regione" && mem.get("am.lidarRegione", null)
           ? h("button", { type: "button", class: "link", onclick: () => cambiaRegione(r) }, "Cambia zona o livello")
           : null,
+        r.def.scegliLivello && mem.get("am.livello." + r.def.id, null)
+          ? h("button", { type: "button", class: "link", onclick: () => cambiaLivelloWms(r) }, "Cambia livello")
+          : null,
       );
     }),
   );
 }
 
-/** «Perché non si vede?»: prova una tessera di ogni livello acceso e racconta che cosa risponde il servizio. */
-async function diagnosiLivelli() {
-  const btn = $("btnDiag");
-  const box = $("diagMsg");
-  occupato(btn, true);
-  try {
-    const attivi = [...sovr.values()].filter((r) => r.on && r.layer && r.def.tipo !== "tile");
-    if (!attivi.length) {
-      box.replaceChildren(h("p", { class: "hint" }, "Accendi prima un livello del Ministero (per esempio il LiDAR) e poi tocca di nuovo."));
-      return;
-    }
-    box.replaceChildren(h("p", { class: "hint" }, "Provo una tessera al centro della mappa…"));
-    const centro = map.getCenter();
-    const schede = [];
-    for (const r of attivi) {
-      const z = Math.min(map.getZoom(), r.def.maxNativeZoom ?? 19);
-      const p = map.project(centro, z).divideBy(256).floor();
-      const coords = L.point(p.x, p.y);
-      coords.z = z;
-      const e = await provaTessera({ url: r.layer.getTileUrl(coords), win: window });
-      schede.push(h("div", { class: "card" },
-        h("div", { class: "pt" }, `${r.def.nome}${r.stato ? " – " + r.stato : ""}`),
-        h("div", { class: e.ok ? "pm" : "pm stato ko" }, e.ok ? `Risponde: ${e.dettaglio}.` : `Non risponde bene: ${e.dettaglio}.`),
-        h("div", { class: "hint" }, `Prova fatta con: ${e.via}. Tessere mostrate finora: ${r.ok ?? 0}${r.nativo ? ` (${r.nativo} con il ripiego dell'app)` : ""}; errori consecutivi: ${r.errori}.${r.messaggio ? " Ultimo messaggio: " + r.messaggio + "." : ""}`),
-        e.miniatura ? h("img", { src: e.miniatura, alt: "Tessera ricevuta dal servizio", width: "96", height: "96", style: "background:#888;border:1px solid #666;margin:4px 0" }) : null,
-        h("details", null, h("summary", null, "Indirizzo provato"), h("code", { style: "word-break:break-all;font-size:11px" }, e.url)),
-      ));
-    }
-    box.replaceChildren(...schede);
-  } catch (e) {
-    box.replaceChildren(h("p", { class: "hint" }, `Prova non riuscita: ${messaggioErrore(e)}`));
-  } finally {
-    occupato(btn, false);
-  }
+/** Tessera di prova di un livello: quella al centro della mappa, a un ingrandimento in cui il livello risponde. */
+function urlProvaTessera(r) {
+  const d = r.def;
+  const z = Math.max(d.minZoom ?? 0, Math.min(map.getZoom(), d.maxNativeZoom ?? 19));
+  const c = map.getCenter();
+  const { x, y } = tesseraDa(c.lat, c.lng, z);
+  return urlTessera({ url: r.urlEffettivo, livelli: r.livelliEffettivi, versione: d.versione ?? "1.3.0", crs: d.crs ?? "EPSG:3857" }, z, x, y);
 }
 
+/**
+ * «Verifica servizi» / «Perché non si vede?»: per ogni servizio WMS chiede la tessera vera al centro della mappa
+ * e racconta che cosa risponde (anche il messaggio del servizio, se è un errore), con miniatura e indirizzo.
+ */
 async function verificaServizi() {
-  const btn = $("btnProbe");
-  occupato(btn, true);
-  $("probeMsg").textContent = "Provo i servizi…";
+  const btns = [$("btnProbe"), $("btnDiag")];
+  btns.forEach((b) => occupato(b, true));
+  const box = $("diagMsg");
+  $("probeMsg").textContent = "Provo i servizi al centro della mappa…";
+  box.replaceChildren();
   const wms = [...sovr.values()].filter((r) => r.def.tipo !== "tile");
+  const schede = [];
   let ok = 0;
-  await Promise.all(wms.map(async (r) => {
-    try {
-      if (r.def.tipo === "wms-regione" && !r.layer) { r.stato = "scegli la regione"; return; }
-      let livelli = r.livelliEffettivi;
-      if (!livelli) {
-        try {
-          livelli = await risolviLivelli(r.def, r.urlEffettivo);
-        } catch {
-          r.stato = "non verificabile"; // l'elenco dei livelli non è leggibile dal browser: non è detto che il servizio sia fermo
-          return;
+  try {
+    for (const r of wms) {
+      let e = null;
+      let nota = "";
+      try {
+        if (r.def.tipo === "wms-regione") {
+          if (!mem.get("am.lidarRegione", null)) throw Object.assign(new Error("regione non ancora scelta"), { sceltaMancante: true });
+          if (!r.livelliEffettivi) await sceglieLidar(r);
+          else r.urlEffettivo = adattaUrl(urlRegione(r.def, mem.get("am.lidarRegione", null)));
+        } else if (!r.livelliEffettivi) {
+          if (r.def.scegliLivello) {
+            const salvato = mem.get("am.livello." + r.def.id, null);
+            if (salvato) {
+              r.livelliEffettivi = salvato;
+            } else {
+              const cap = await caricaCapabilities(r.urlEffettivo);
+              r.livelliEffettivi = cap.livelli[0].name;
+              nota = `Provato il primo livello elencato (${r.livelliEffettivi}); per sceglierne un altro accendi il livello e poi «Cambia livello».`;
+            }
+          } else {
+            r.livelliEffettivi = await risolviLivelli(r.def, r.urlEffettivo);
+          }
         }
+        e = await provaTessera({ url: urlProvaTessera(r), win: window });
+        r.salute = e.ok ? "risponde" : "non risponde";
+        if (e.ok) ok++;
+      } catch (err) {
+        r.salute = err.sceltaMancante ? "scegli la regione" : "non verificabile";
+        nota = err.sceltaMancante ? "Accendi il livello una volta per scegliere regione e livello, poi riprova." : `L'elenco dei livelli non è leggibile da qui: ${messaggioErrore(err)}.`;
       }
-      r.livelliEffettivi = livelli;
-      const raggio = (r.def.minZoom ?? 0) >= 15 ? 250 : 20000; // il catasto risponde solo a scala di dettaglio
-      const esito = await provaServizio(r.urlEffettivo, livelli, r.def.versione ?? "1.3.0", 15000, raggio);
-      r.stato = esito === "ok" ? "risponde" : "non risponde";
-      if (esito === "ok") ok++;
-    } catch {
-      r.stato = "non risponde";
+      if (r.stato === "da verificare" && e) r.stato = "";
+      schede.push(h("div", { class: "card" },
+        h("div", { class: "pt" }, `${r.def.nome}${r.stato ? " – " + r.stato : ""}`),
+        e
+          ? h("div", { class: e.ok ? "pm" : "pm stato ko" }, e.ok ? `Risponde: ${e.dettaglio}.` : `Non risponde bene: ${e.dettaglio}.`)
+          : null,
+        nota ? h("div", { class: "hint" }, nota) : null,
+        e ? h("div", { class: "hint" }, `Prova fatta con: ${e.via}.${r.on ? ` Tessere mostrate finora: ${r.ok ?? 0}${r.nativo ? ` (${r.nativo} con il ripiego dell'app)` : ""}.` : ""}${r.messaggio ? " Ultimo messaggio: " + r.messaggio + "." : ""}`) : null,
+        e?.miniatura ? h("img", { src: e.miniatura, alt: "Tessera ricevuta dal servizio", width: "96", height: "96", style: "background:#888;border:1px solid #666;margin:4px 0" }) : null,
+        e ? h("details", null, h("summary", null, "Indirizzo provato"), h("code", { style: "word-break:break-all;font-size:11px" }, e.url)) : null,
+      ));
     }
-  }));
-  disegnaSovr();
-  occupato(btn, false);
-  const nv = wms.filter((r) => r.stato === "non verificabile").length;
-  $("probeMsg").textContent = `${ok} su ${wms.length} rispondono${nv ? `, ${nv} non ${nv === 1 ? "verificabile" : "verificabili"} da qui` : ""}. «Risponde» non garantisce che ci siano dati in ogni zona.`;
+  } catch (err) {
+    schede.push(h("p", { class: "hint" }, `Prova non riuscita: ${messaggioErrore(err)}`));
+  } finally {
+    disegnaSovr();
+    box.replaceChildren(...schede);
+    btns.forEach((b) => occupato(b, false));
+    $("probeMsg").textContent = `${ok} su ${wms.length} rispondono con un'immagine alla tessera al centro della mappa. «Risponde» non garantisce che ci siano dati in ogni zona.`;
+  }
 }
 
 // ---------------------------------------------------------- servizio WMS manuale
@@ -1172,7 +1219,7 @@ function avvia() {
   });
   $("zonesExtra").addEventListener("change", () => { if (ultimeZone) disegnaZone(ultimeZone.res, $("zonesExtra").checked); });
   $("btnProbe").addEventListener("click", verificaServizi);
-  $("btnDiag").addEventListener("click", diagnosiLivelli);
+  $("btnDiag").addEventListener("click", verificaServizi);
   $("btnNear").addEventListener("click", cercaDintorni);
   $("btnNearGeo").addEventListener("click", () => esportaDintorni("geo"));
   $("btnNearCsv").addEventListener("click", () => esportaDintorni("csv"));

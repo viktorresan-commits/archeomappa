@@ -88,7 +88,10 @@ export const SOVRAPPOSIZIONI = [
     nome: "Catasto: particelle",
     tipo: "wms",
     url: "https://wms.cartografia.agenziaentrate.gov.it/inspire/wms/ows01.php",
-    livelli: "CP.CadastralParcel",
+    // Stessa richiesta dell'app di riferimento: WMS 1.3.0 in EPSG:4258, con particelle, fabbricati, strade e acque.
+    livelli: "CP.CadastralParcel,fabbricati,strade,acque",
+    versione: "1.3.0",
+    crs: "EPSG:4258",
     minZoom: 15,
     opacita: 0.85,
     attr: "© Agenzia delle Entrate (CC BY 4.0)",
@@ -113,9 +116,10 @@ export const SOVRAPPOSIZIONI = [
     nome: "IGM 1:25.000",
     tipo: "wms",
     url: WMS_PCN + "raster/IGM_25000.map",
+    scegliLivello: true, // il servizio ne elenca più d'uno (per fuso): se uno dà errore se ne può provare un altro
     opacita: 0.9,
     attr: "© Istituto Geografico Militare – Geoportale Nazionale",
-    nota: "Cartografia storica: toponimi utili per ricerche d'archivio.",
+    nota: "Cartografia storica: toponimi utili per ricerche d'archivio. Se la verifica riporta un errore sul file degli indici (msShapefileOpen), è un guasto del servizio del Ministero, non dell'app: prova un altro livello con «Cambia livello».",
     daVerificare: true,
   },
   {
@@ -185,6 +189,15 @@ export function creaLivello(L, def, { livelli, url } = {}) {
     });
   }
   if (def.maxNativeZoom) comuni.maxNativeZoom = def.maxNativeZoom;
+  if (def.crs === "EPSG:4258") {
+    // Leaflet sa chiedere solo in 3857: qui la tessera si calcola in gradi, nell'ordine di assi del WMS 1.3.0
+    const Capa = L.TileLayer.extend({
+      getTileUrl(c) {
+        return urlTessera({ url: url ?? def.url, livelli: livelli ?? def.livelli, versione: def.versione ?? "1.3.0", crs: def.crs }, this._getZoomForUrl(), c.x, c.y);
+      },
+    });
+    return new Capa("", comuni);
+  }
   return L.tileLayer.wms(url ?? def.url, {
     ...comuni,
     layers: livelli ?? def.livelli,
@@ -192,6 +205,42 @@ export function creaLivello(L, def, { livelli, url } = {}) {
     transparent: true,
     version: def.versione ?? "1.3.0",
   });
+}
+
+// ---------------------------------------------------------- tessere
+
+const MEZZO_MONDO = 20037508.342789244;
+
+/** Tessera (x, y) che contiene il punto, allo zoom z. */
+export function tesseraDa(lat, lon, z) {
+  const n = 2 ** z;
+  const rad = (lat * Math.PI) / 180;
+  const x = Math.floor(((lon + 180) / 360) * n);
+  const y = Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n);
+  return { x: Math.min(n - 1, Math.max(0, x)), y: Math.min(n - 1, Math.max(0, y)) };
+}
+
+/**
+ * GetMap 256×256 della tessera z/x/y, nello stesso formato delle app che già funzionano con questi servizi.
+ * crs: EPSG:3857 (predefinito) o EPSG:4258 (gradi; con WMS 1.3.0 l'ordine degli assi è latitudine, longitudine).
+ */
+export function urlTessera({ url, livelli, versione = "1.1.1", crs = "EPSG:3857" }, z, x, y) {
+  const n = 2 ** z;
+  const sep = url.includes("?") ? "&" : "?";
+  const nomeCrs = versione === "1.1.1" ? "SRS" : "CRS";
+  const testa = `${url}${sep}SERVICE=WMS&VERSION=${versione}&REQUEST=GetMap&LAYERS=${livelli}&STYLES=&${nomeCrs}=${crs}&BBOX=`;
+  const coda = "&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true";
+  if (crs === "EPSG:4258") {
+    const lat = (yy) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * yy) / n))) * 180) / Math.PI;
+    const lon = (xx) => (xx / n) * 360 - 180;
+    const bbox = versione === "1.1.1"
+      ? [lon(x), lat(y + 1), lon(x + 1), lat(y)]
+      : [lat(y + 1), lon(x), lat(y), lon(x + 1)];
+    return testa + bbox.map((v) => v.toFixed(7)).join(",") + coda;
+  }
+  const lato = (2 * MEZZO_MONDO) / n;
+  const minx = -MEZZO_MONDO + x * lato, maxy = MEZZO_MONDO - y * lato;
+  return testa + [minx, maxy - lato, minx + lato, maxy].map((v) => v.toFixed(3)).join(",") + coda;
 }
 
 // ----------------------------------------------------- nomi dei livelli WMS

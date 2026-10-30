@@ -1,7 +1,7 @@
 // Livelli del Ministero, adattamento http/https, proxy e client nativo. Esegui con: node tests/test-layers.mjs
 import assert from "node:assert/strict";
 import {
-  SOVRAPPOSIZIONI, WMS_PCN, PCN_HOST, ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlRegione, prodottiRegione, urlProva, creaLivello,
+  SOVRAPPOSIZIONI, WMS_PCN, PCN_HOST, ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlRegione, prodottiRegione, urlProva, creaLivello, urlTessera, tesseraDa,
 } from "../js/layers.js";
 import { fetchNativo } from "../js/util.js";
 import { caricaCapabilities } from "../js/sources.js";
@@ -101,6 +101,49 @@ test("l'ortofoto ha il livello noto: non serve leggere il servizio", () => {
   const o = SOVRAPPOSIZIONI.find((s) => s.id === "ortofoto");
   assert.equal(o.livelli, "OI.ORTOIMMAGINI.2012.33");
   assert.equal(o.versione, "1.1.1");
+});
+
+console.log("tessere nel formato dell'app che già funziona");
+// formule copiate dall'app di riferimento (piattaforma.js, remoteTileUrl)
+const MEZZO = 20037508.342789244;
+const bboxRif = (z, x, y) => { const size = (2 * MEZZO) / 2 ** z; const minx = -MEZZO + x * size, maxy = MEZZO - y * size; return [minx, maxy - size, minx + size, maxy].map((v) => v.toFixed(3)).join(","); };
+const parametri = (u) => Object.fromEntries([...new URL(u).searchParams.entries()]);
+test("tessera 3857: stessi parametri dell'app di riferimento", () => {
+  const base = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map";
+  const u = urlTessera({ url: base, livelli: "EL.LIDAR.MARCHE.1x1.DTM", versione: "1.1.1" }, 17, 70233, 48000);
+  const rif = `${base}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=EL.LIDAR.MARCHE.1x1.DTM&STYLES=&SRS=EPSG:3857&BBOX=${bboxRif(17, 70233, 48000)}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true`;
+  assert.equal(u, rif);
+});
+test("tessera EPSG:4258 (catasto): stessi parametri e stesso ordine degli assi dell'app di riferimento", () => {
+  const z = 17, x = 70233, y = 48000, n = 2 ** z;
+  const lat = (yy) => Math.atan(Math.sinh(Math.PI * (1 - 2 * yy / n))) * 180 / Math.PI, lng = (xx) => xx / n * 360 - 180;
+  const rif = `https://wms.cartografia.agenziaentrate.gov.it/inspire/wms/ows01.php?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&LAYERS=CP.CadastralParcel,fabbricati,strade,acque&CRS=EPSG:4258&BBOX=${lat(y + 1).toFixed(7)},${lng(x).toFixed(7)},${lat(y).toFixed(7)},${lng(x + 1).toFixed(7)}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true`;
+  const c = SOVRAPPOSIZIONI.find((o) => o.id === "catasto");
+  const u = urlTessera({ url: c.url, livelli: c.livelli, versione: c.versione, crs: c.crs }, z, x, y);
+  assert.deepEqual(parametri(u), parametri(rif));
+  assert.equal(c.livelli, "CP.CadastralParcel,fabbricati,strade,acque");
+});
+test("il catasto usa un livello con tessere calcolate in gradi (non il WMS di Leaflet)", () => {
+  const c = SOVRAPPOSIZIONI.find((o) => o.id === "catasto");
+  let creato = null;
+  const L = { TileLayer: { extend: (proto) => class { constructor(u, o) { creato = { u, o, proto: this }; Object.assign(this, proto); this._getZoomForUrl = () => 17; } } }, tileLayer: { wms: () => { throw new Error("non doveva usare il WMS di Leaflet"); } } };
+  const layer = creaLivello(L, c, { url: c.url, livelli: c.livelli });
+  assert.equal(creato.o.minZoom, 15);
+  const u = layer.getTileUrl({ x: 70233, y: 48000 });
+  assert.match(u, /CRS=EPSG:4258&BBOX=43\.\d+,12\.\d+,43\.\d+,12\.\d+&WIDTH=256/);
+});
+test("tesseraDa: il punto sta dentro la tessera trovata", () => {
+  for (const [lat, lon, z] of [[43.3, 12.9, 17], [41.9, 12.5, 12], [46.5, 11.3, 15]]) {
+    const { x, y } = tesseraDa(lat, lon, z);
+    const n = 2 ** z;
+    const la = (yy) => Math.atan(Math.sinh(Math.PI * (1 - 2 * yy / n))) * 180 / Math.PI, lo = (xx) => xx / n * 360 - 180;
+    assert.ok(lat <= la(y) && lat >= la(y + 1) && lon >= lo(x) && lon <= lo(x + 1), `${lat},${lon} z${z}`);
+  }
+});
+test("l'IGM chiede il livello da scegliere e la nota spiega gli errori del servizio", () => {
+  const igm = SOVRAPPOSIZIONI.find((o) => o.id === "igm25");
+  assert.equal(igm.scegliLivello, true);
+  assert.match(igm.nota, /msShapefileOpen/);
 });
 
 console.log("client nativo (app Android)");
