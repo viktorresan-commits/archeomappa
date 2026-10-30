@@ -81,25 +81,67 @@ test("colori: nodata trasparente, LRM blu/arancio, scala simmetrica", () => {
   assert.ok(rgba[8] > rgba[10], "positivo arancio");
   assert.deepEqual([...rgba.slice(4, 7)], [255, 255, 255]);
 });
-test("riproiezione: un pixel noto finisce nel punto giusto della mappa", () => {
+// Baricentro (pesato dall'opacità) di ciò che è stato disegnato nell'immagine riproiettata, in gradi.
+function baricentro(out) {
+  const [[sud, ovest], [nord, est]] = out.bounds;
+  let sa = 0, sc = 0, sr = 0;
+  for (let i = 0; i < out.w * out.h; i++) { const a = out.rgba[i * 4 + 3]; if (!a) continue; sa += a; sc += a * (i % out.w + 0.5); sr += a * (Math.floor(i / out.w) + 0.5); }
+  return { lon: ovest + (sc / sa / out.w) * (est - ovest), lat: nord - (sr / sa / out.h) * (nord - sud), massa: sa };
+}
+const rosso = (w, h, c, r) => { const a = new Uint8ClampedArray(w * h * 4); const o = (r * w + c) * 4; a[o] = 255; a[o + 3] = 255; return a; };
+
+test("riproiezione: un pixel noto finisce nel punto giusto della mappa (baricentro entro 1/4 di pixel)", () => {
   const P = creaProiezione(32632);
   const w = 100, h = 100, cella = 2, origine = { x: 760000, y: 4735000 };
-  const rgba = new Uint8ClampedArray(w * h * 4);
   const cm = 70, rm = 30;
-  const o = (rm * w + cm) * 4;
-  rgba[o] = 255; rgba[o + 1] = 0; rgba[o + 2] = 0; rgba[o + 3] = 255;
-  const out = riproiettaPerMappa(rgba, w, h, cella, origine, P);
-  const [[sud, ovest], [nord, est]] = out.bounds;
-  let trovato = null;
-  for (let i = 0; i < out.w * out.h; i++) if (out.rgba[i * 4] === 255 && out.rgba[i * 4 + 3] === 255) { trovato = i; break; }
-  assert.ok(trovato != null);
-  const c2 = trovato % out.w, r2 = Math.floor(trovato / out.w);
-  const lon = ovest + ((c2 + 0.5) / out.w) * (est - ovest);
+  const out = riproiettaPerMappa(rosso(w, h, cm, rm), w, h, cella, origine, P);
+  const b = baricentro(out);
   const attesa = P.aLatLon(origine.x + (cm + 0.5) * cella, origine.y - (rm + 0.5) * cella);
-  assert.ok(Math.abs(lon - attesa[1]) < 3e-6 * 3, `lon ${lon} vs ${attesa[1]}`);
-  // latitudine: riga in Mercator
-  const lat = nord - ((r2 + 0.5) / out.h) * (nord - sud);
-  assert.ok(Math.abs(lat - attesa[0]) < 2e-5, `lat ${lat} vs ${attesa[0]}`); // errore max ~2 m (Mercator vs lineare, su 200 m è trascurabile)
+  const gradiPerM = 1 / 111195;
+  assert.ok(Math.abs(b.lon - attesa[1]) < cella * 0.25 * gradiPerM / Math.cos(attesa[0] * Math.PI / 180), `lon ${b.lon} vs ${attesa[1]}`);
+  assert.ok(Math.abs(b.lat - attesa[0]) < cella * 0.25 * gradiPerM, `lat ${b.lat} vs ${attesa[0]}`);
+  assert.ok(out.rgba.every((v, i) => i % 4 !== 0 || v === 0 || v === 255 || out.rgba[i + 3] > 0), "colore solo dove c'è opacità");
+});
+test("riproiezione: il colore resta puro anche dove l'opacità è parziale (niente alone scuro ai bordi)", () => {
+  const P = creaProiezione(32632);
+  const w = 60, h = 60, origine = { x: 760000, y: 4735000 };
+  const out = riproiettaPerMappa(rosso(w, h, 30, 30), w, h, 2, origine, P);
+  for (let i = 0; i < out.w * out.h; i++) {
+    if (out.rgba[i * 4 + 3] > 0) { assert.equal(out.rgba[i * 4], 255); assert.equal(out.rgba[i * 4 + 1], 0); }
+  }
+});
+test("riproiezione: un tratto dritto resta dritto (niente scala di gradini dovuta alla rotazione UTM-Mercatore)", () => {
+  const P = creaProiezione(32633); // Fabriano è nel fuso 33, a ~2° dal meridiano centrale: la griglia è ruotata di ~1,4°
+  const w = 400, h = 400, cella = 1, origine = { x: 330000, y: 4810000 };
+  const a = new Uint8ClampedArray(w * h * 4);
+  for (let r = 0; r < h; r++) for (let c = 195; c < 205; c++) { const o = (r * w + c) * 4; a[o] = 200; a[o + 1] = 200; a[o + 2] = 200; a[o + 3] = 255; }
+  const out = riproiettaPerMappa(a, w, h, cella, origine, P, 2400, { sovracampione: 1 });
+  // la striscia è un segmento: la sua larghezza misurata in orizzontale non deve oscillare a salti di un pixel intero
+  const larghezze = [];
+  for (let r = 40; r < out.h - 40; r += 10) {
+    let somma = 0; for (let c = 0; c < out.w; c++) somma += out.rgba[(r * out.w + c) * 4 + 3] / 255;
+    larghezze.push(somma);
+  }
+  const min = Math.min(...larghezze), max = Math.max(...larghezze);
+  assert.ok(max - min < 0.35, `larghezza da ${min.toFixed(2)} a ${max.toFixed(2)} pixel`);
+});
+test("riproiezione: con il sovracampionamento l'immagine ha più pixel, entro il lato massimo", () => {
+  const P = creaProiezione(32632);
+  const w = 100, h = 100, origine = { x: 760000, y: 4735000 };
+  const a1 = riproiettaPerMappa(rosso(w, h, 50, 50), w, h, 1, origine, P, 3000);
+  const a2 = riproiettaPerMappa(rosso(w, h, 50, 50), w, h, 1, origine, P, 3000, { sovracampione: 2 });
+  assert.ok(Math.abs(a2.w / a1.w - 2) < 0.05, `${a1.w} → ${a2.w}`);
+  const a3 = riproiettaPerMappa(rosso(w, h, 50, 50), w, h, 1, origine, P, 150, { sovracampione: 2 });
+  assert.ok(a3.w <= 150 + 1, `tetto ${a3.w}`);
+  const a4 = riproiettaPerMappa(rosso(w, h, 50, 50), w, h, 1, origine, P, 50);
+  assert.ok(a4.w <= 51, `riduzione ${a4.w}`);
+});
+test("riproiezione: fuori dall'area sorgente resta trasparente e il baricentro di un pixel è lo stesso a 1× e 2×", () => {
+  const P = creaProiezione(32632);
+  const w = 100, h = 100, cella = 2, origine = { x: 760000, y: 4735000 };
+  const b1 = baricentro(riproiettaPerMappa(rosso(w, h, 70, 30), w, h, cella, origine, P, 3000));
+  const b2 = baricentro(riproiettaPerMappa(rosso(w, h, 70, 30), w, h, cella, origine, P, 3000, { sovracampione: 2 }));
+  assert.ok(Math.abs(b1.lon - b2.lon) < 4e-6 && Math.abs(b1.lat - b2.lat) < 3e-6, `${b1.lon},${b1.lat} / ${b2.lon},${b2.lat}`);
 });
 
 console.log(process.exitCode ? "\nPROVE FALLITE" : `\nTutte le prove delle visualizzazioni superate (${ok}).`);

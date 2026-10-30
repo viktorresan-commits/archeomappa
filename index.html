@@ -35,6 +35,9 @@
       </header>
       <div id="quick" class="quick" role="toolbar" aria-label="Livelli sulla mappa"></div>
       <div id="map" aria-label="Mappa"></div>
+      <button id="btnSpegni" type="button" class="fab" aria-label="Spegni tutti i livelli sovrapposti" title="Spegni tutti i livelli sovrapposti">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 12.500 9 5 9-5"/><path d="m3 16.500 9 5 9-5"/><path d="M4 4l16 16" stroke-width="2.400"/></svg>
+      </button>
       <div id="cmpBarra" class="cmpbarra" role="toolbar" aria-label="Confronto fra due livelli" hidden>
         <span id="cmpEtichetta" class="cmpetichetta"></span>
         <button id="btnCmpModo" type="button" class="chip">Lampeggio</button>
@@ -67,6 +70,7 @@
           <div id="baseList" class="optlist"></div>
 
           <h2>Livelli sovrapposti</h2>
+          <p class="hint">Quello più in alto nell'elenco sta sopra gli altri sulla mappa. Con ▲ e ▼ scegli quali vanno sopra e quali sotto: l'ordine viene ricordato.</p>
           <div id="overlayList" class="optlist"></div>
           <div class="row">
             <button id="btnProbe" type="button" class="btn">Verifica servizi</button>
@@ -233,6 +237,8 @@
           <label class="field">Opacità del rilievo: <output id="relOpacityOut">75%</output>
             <input id="relOpacity" type="range" min="20" max="100" step="5" value="75">
           </label>
+          <label class="check" id="relLevigaBox"><input id="relLeviga" type="checkbox" checked> Leviga i gradini del servizio (consigliato)</label>
+          <p class="hint">Il servizio manda il terreno in 256 grigi, cioè a gradini. Levigarli toglie le false curve di livello dalle ombre e resta sempre entro mezzo gradino dal dato del servizio. Non aggiunge dettagli che il servizio non ha.</p>
           <div class="row">
             <button id="btnRelShow" type="button" class="btn primary">Mostra il rilievo</button>
             <button id="btnRelFind" type="button" class="btn primary">Cerca anomalie</button>

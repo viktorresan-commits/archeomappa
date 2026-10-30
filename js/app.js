@@ -15,10 +15,12 @@ import {
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
 import { aggiungiRipiegoNativo, provaTessera } from "./tessere.js";
-import { variantiConPreferita, scegliVariante, fusoCambiato } from "./varianti.js";
+import { variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva } from "./varianti.js";
+import { ordineIniziale, spostaLivello, zIndexDi } from "./ordine.js";
 import { creaConfrontoLivelli } from "./tendina.js";
+import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
 
-const VERSIONE = "0.4.0";
+const VERSIONE = "0.5.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -149,7 +151,7 @@ function disegnaBasi() {
     ...BASI.map((b) => {
       const id = "base-" + b.id;
       const r = h("input", { type: "radio", name: "base", id, checked: b.id === baseAttiva ? true : null, onchange: () => cambiaBase(b.id) });
-      return h("div", { class: "opt" }, h("label", { for: id }, r, b.nome));
+      return h("div", { class: "opt" }, h("label", { for: id }, r, h("span", null, b.nome, b.nota ? h("span", { class: "nota" }, b.nota) : null)));
     }),
   );
   disegnaRapidi();
@@ -186,6 +188,20 @@ function registraSovr(def) {
 SOVRAPPOSIZIONI.forEach(registraSovr);
 personalizzati.forEach(registraSovr);
 
+// ordine dei livelli: il primo dell'elenco sta sopra tutti gli altri sulla mappa (ricordato fra una sessione e l'altra)
+let ordineSovr = ordineIniziale([...sovr.keys()], mem.get("am.ordine", null));
+const salvaOrdine = () => mem.set("am.ordine", ordineSovr);
+function applicaOrdine() {
+  for (const r of sovr.values()) r.layer?.setZIndex?.(zIndexDi(ordineSovr, r.def.id));
+}
+function muoviLivello(r, direzione) {
+  const accesi = new Set([...sovr.values()].filter((x) => x.on).map((x) => x.def.id));
+  ordineSovr = spostaLivello(ordineSovr, r.def.id, direzione, accesi);
+  salvaOrdine();
+  applicaOrdine();
+  disegnaSovr();
+}
+
 function salvaSovr() {
   const o = {};
   for (const [id, r] of sovr) o[id] = { on: r.on, opacita: r.opacita };
@@ -209,8 +225,6 @@ function messaggioTessere(r) {
   }
   return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento. Tocca «Perché non si vede?» qui sotto per i dettagli.`;
 }
-
-let zCont = 10;
 
 /** Regione e livello del LiDAR: usa la scelta salvata, altrimenti la chiede. Restituisce false se annullata. */
 async function sceglieLidar(r) {
@@ -270,24 +284,30 @@ async function cambiaFonteLidar() {
 
 // ---- livelli del Ministero con un livello per fuso (ortofoto, IGM): il formato di richiesta si sceglie provando
 
-/** Tessera di prova di una variante: quella al centro della mappa, a un ingrandimento in cui il livello risponde. */
-function urlProvaVariante(r, v) {
-  const d = r.def;
-  const z = Math.max(d.minZoom ?? 0, Math.min(map.getZoom(), d.maxNativeZoom ?? 19));
+/** Tessera di prova di una variante: quella al centro della mappa, allo zoom z (di norma uno a cui il livello disegna davvero). */
+function urlProvaVariante(r, v, z) {
   const zt = v.tile === 512 ? Math.max(0, z - 1) : z; // un'immagine da 512 px copre l'area di una tessera da 256 allo zoom precedente
   const c = map.getCenter();
   const { x, y } = tesseraDa(c.lat, c.lng, zt);
   return urlTessera({ url: r.urlEffettivo, livelli: v.livelli, versione: v.versione, px: v.tile }, zt, x, y);
 }
 
-/** Prova le varianti una dopo l'altra e si ferma alla prima che dà un'immagine non vuota. */
+/**
+ * Prova le varianti una dopo l'altra e si ferma alla prima che dà un'immagine non vuota. Se tutte rispondono con
+ * un'immagine vuota (il servizio non disegna a quell'ingrandimento) ripete la prova a ingrandimenti più alti;
+ * se rispondono con errori non ha senso ripeterla, perché l'errore non dipende dall'ingrandimento.
+ */
 async function provaVarianti(r, { tutte = false } = {}) {
   const elenco = variantiConPreferita(r.def.famiglia, map.getCenter().lng, mem.get("am.variante." + r.def.id, null));
-  const esiti = [];
-  for (const v of elenco) {
-    const e = await provaTessera({ url: urlProvaVariante(r, v), win: window });
-    esiti.push({ variante: v, ...e });
-    if (e.ok && !e.vuota && !tutte) break;
+  let esiti = [];
+  for (const z of zoomDiProva(map.getZoom(), r.def)) {
+    esiti = [];
+    for (const v of elenco) {
+      const e = await provaTessera({ url: urlProvaVariante(r, v, z), win: window });
+      esiti.push({ variante: v, zoomProva: z, ...e });
+      if (e.ok && !e.vuota && !tutte) break;
+    }
+    if (esiti.some((e) => e.ok && !e.vuota) || !esiti.some((e) => e.ok)) break;
   }
   return esiti;
 }
@@ -346,7 +366,7 @@ async function costruisciLivelloSovr(r) {
   const v = r.variante;
   const layer = creaLivello(L, d, { url: r.urlEffettivo, livelli: r.livelliEffettivi, versione: v?.versione, tileSize: v?.tile });
   layer.setOpacity(r.opacita);
-  layer.setZIndex(++zCont);
+  layer.setZIndex(zIndexDi(ordineSovr, d.id));
   if (d.tipo !== "tile") {
     r.ok = 0; r.nativo = 0; r.messaggio = r.messaggio ?? "";
     aggiungiRipiegoNativo(layer, { win: window, stato: r });
@@ -483,6 +503,8 @@ function iniziaProxy() {
 function rimuoviPersonalizzato(r) {
   if (r.layer) map.removeLayer(r.layer);
   sovr.delete(r.def.id);
+  ordineSovr = ordineSovr.filter((x) => x !== r.def.id);
+  salvaOrdine();
   personalizzati.splice(0, personalizzati.length, ...personalizzati.filter((p) => p.id !== r.def.id));
   mem.set("am.wmsCustom", personalizzati);
   salvaSovr();
@@ -490,8 +512,9 @@ function rimuoviPersonalizzato(r) {
 }
 
 function disegnaSovr() {
+  const nelOrdine = ordineSovr.map((id) => sovr.get(id)).filter(Boolean);
   $("overlayList").replaceChildren(
-    ...[...sovr.values()].map((r) => {
+    ...nelOrdine.map((r, i) => {
       const id = "ov-" + r.def.id;
       const cb = h("input", { type: "checkbox", id, checked: r.on || r.occupato ? true : null, disabled: r.occupato ? true : null });
       cb.addEventListener("change", () => alternaSovr(r, cb.checked));
@@ -515,6 +538,15 @@ function disegnaSovr() {
         r.def.tipo === "wms-regione" && mem.get("am.lidarRegione", null)
           ? h("button", { type: "button", class: "link", onclick: () => cambiaRegione(r) }, "Cambia zona o livello")
           : null,
+        h("div", { class: "ord", role: "group", "aria-label": `Posizione di ${r.def.nome}` },
+          h("button", {
+            type: "button", class: "ordbtn", title: "Porta sopra", "aria-label": `Porta «${r.def.nome}» più in alto`,
+            disabled: i === 0 ? true : null, onclick: () => muoviLivello(r, -1),
+          }, "▲"),
+          h("button", {
+            type: "button", class: "ordbtn", title: "Porta sotto", "aria-label": `Porta «${r.def.nome}» più in basso`,
+            disabled: i === nelOrdine.length - 1 ? true : null, onclick: () => muoviLivello(r, 1),
+          }, "▼")),
       );
     }),
   );
@@ -523,10 +555,17 @@ function disegnaSovr() {
 
 // ------------------------------------------------- pulsanti sulla mappa
 
-const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite" };
+const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite", cyclosm: "CyclOSM", hot: "Umanitaria", voyager: "Voyager", positron: "Positron", s2: "Sentinel-2" };
+
+/** Apre l'elenco delle mappe di base, perché con otto mappe scorrerle una alla volta non è comodo. */
+async function scegliBase() {
+  const id = await scegli("Mappa di base", BASI.map((b) => ({ etichetta: b.id === baseAttiva ? `✓ ${b.nome}` : b.nome, valore: b.id })));
+  if (id) cambiaBase(id);
+}
 
 /** Spegne tutti i livelli sovrapposti accesi (le mappe di base restano). */
 function spegniTutti() {
+  if (sessioneConfronto && !confrontoOccupato) fermaConfronto(); // il confronto usa dei livelli: finisce prima
   for (const r of sovr.values()) {
     if (!r.on) continue;
     if (r.layer) map.removeLayer(r.layer);
@@ -536,20 +575,21 @@ function spegniTutti() {
   disegnaSovr();
 }
 
-function prossimaBase() {
-  const i = BASI.findIndex((b) => b.id === baseAttiva);
-  cambiaBase(BASI[(i + 1) % BASI.length].id);
-}
-
 /** Barra di pulsanti sopra la mappa: accende e spegne i livelli senza aprire il pannello Livelli. */
 function disegnaRapidi() {
   const barra = $("quick");
   if (!barra) return;
+  const spegni = $("btnSpegni");
+  if (spegni) {
+    const accesi = [...sovr.values()].some((r) => r.on);
+    spegni.disabled = !accesi;
+    spegni.title = accesi ? "Spegni tutti i livelli sovrapposti" : "Nessun livello sovrapposto acceso";
+  }
   const z = map.getZoom();
   const rapidi = [...sovr.values()].filter((r) => r.def.rapido);
   const nomeBase = BASE_BREVE[baseAttiva] ?? baseAttiva;
   barra.replaceChildren(
-    h("button", { type: "button", class: "chip", title: "Cambia la mappa di base", "aria-label": `Mappa di base: ${nomeBase}. Tocca per cambiarla`, onclick: prossimaBase }, `Base: ${nomeBase}`),
+    h("button", { type: "button", class: "chip", title: "Scegli la mappa di base", "aria-label": `Mappa di base: ${nomeBase}. Tocca per sceglierne un'altra`, onclick: scegliBase }, `Base: ${nomeBase}`),
     ...rapidi.map((r) => {
       const fuori = r.on && r.def.minZoom && z < r.def.minZoom;
       const nome = r.def.etichettaRapida ?? r.def.nome;
@@ -561,7 +601,6 @@ function disegnaRapidi() {
         onclick: () => alternaSovr(r, !r.on),
       }, nome, fuori ? ` (zoom ${r.def.minZoom}+)` : null, r.problema ? " !" : null);
     }),
-    rapidi.some((r) => r.on) ? h("button", { type: "button", class: "chip", "aria-label": "Spegni tutti i livelli sovrapposti", onclick: spegniTutti }, "Spegni tutto") : null,
     h("button", {
       type: "button", class: "chip", "aria-pressed": confrontoLivelli.attivo ? "true" : "false",
       title: "Confronta due livelli con un cursore o a lampeggio",
@@ -597,6 +636,7 @@ function riempiConfronto() {
 function aggiornaBarraConfronto() {
   const c = confrontoLivelli;
   $("cmpBarra").hidden = !c.attivo;
+  $("btnSpegni")?.classList.toggle("alto", c.attivo); // la barra del confronto sta in basso: il tasto si alza
   if (c.attivo) {
     $("cmpEtichetta").textContent = c.etichetta();
     $("btnCmpModo").textContent = c.modo === "tendina" ? "Passa al lampeggio" : "Passa al cursore";
@@ -740,7 +780,7 @@ async function verificaServizi() {
         } else if (r.def.famiglia) {
           const esiti = await provaVarianti(r, { tutte: true });
           r.esitiVarianti = esiti;
-          righe = esiti.map((x) => ({ ok: x.ok && !x.vuota, testo: `${x.variante.id}. ${x.variante.etichetta}: ${x.ok ? (x.vuota ? "risponde ma l'immagine è vuota" : "immagine ricevuta") : x.dettaglio}.` }));
+          righe = esiti.map((x) => ({ ok: x.ok && !x.vuota, testo: `${x.variante.id}. ${x.variante.etichetta} (zoom ${x.zoomProva}): ${x.ok ? (x.vuota ? "risponde ma l'immagine è vuota" : "immagine ricevuta") : x.dettaglio}.` }));
           const { variante, stato } = scegliVariante(esiti);
           if (variante) {
             const cambiata = r.variante?.id !== variante.id;
@@ -843,6 +883,8 @@ function iniziaWms() {
     personalizzati.push({ ...def });
     mem.set("am.wmsCustom", personalizzati);
     registraSovr(def);
+    ordineSovr = [def.id, ...ordineSovr]; // un livello nuovo parte in cima
+    salvaOrdine();
     const r = sovr.get(def.id);
     r.stato = "";
     disegnaSovr();
@@ -904,7 +946,79 @@ function ottieniCentro() {
   return centro;
 }
 
-map.on("click", (e) => impostaCentro(e.latlng.lat, e.latlng.lng));
+// --- tocco lungo: coordinate del punto, copia e «Apri in Google Maps»
+
+let popupPunto = null;
+let ultimaAperturaPunto = 0;
+
+function apriPuntoMappa(latlng) {
+  if (Date.now() - ultimaAperturaPunto < 900) return; // tocco lungo e menu del browser possono arrivare insieme
+  ultimaAperturaPunto = Date.now();
+  const testo = fmtCoord(latlng.lat, latlng.lng);
+  const url = urlGoogleMaps(gen(latlng.lat), gen(latlng.lng));
+  const copia = async () => {
+    try {
+      await navigator.clipboard.writeText(testo);
+      toast("Coordinate copiate.");
+    } catch {
+      toast("Non riesco a copiare: selezionale e copiale a mano.");
+    }
+  };
+  const contenuto = h("div", { class: "pt-lungo" },
+    h("div", { class: "pt" }, "Punto sulla mappa"),
+    h("div", { class: "coord", "data-coordinate": testo }, testo),
+    pubblica() ? h("div", { class: "pm" }, "Modalità pubblica: posizione generalizzata (circa 1 km).") : null,
+    h("div", { class: "azioni" },
+      url ? h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer", "data-azione": "google" }, "Apri in Google Maps") : null,
+      h("button", { type: "button", class: "btn", "data-azione": "copia", onclick: copia }, "Copia"),
+      h("button", {
+        type: "button", class: "btn", "data-azione": "centro",
+        onclick: () => { impostaCentro(latlng.lat, latlng.lng); map.closePopup(popupPunto); },
+      }, "Usa come centro"),
+    ),
+  );
+  const segno = L.circleMarker(latlng, { radius: 7, color: "#fff", weight: 2, fillColor: "#b3541e", fillOpacity: 0.95, interactive: false, pane: "markerPane" }).addTo(map);
+  // closeOnClick spento: il «click» di rilascio dopo il tocco lungo chiuderebbe subito il riquadro
+  popupPunto = L.popup({ className: "popupPunto", minWidth: 210, maxWidth: 280, autoPanPadding: [16, 80], closeButton: true, closeOnClick: false })
+    .setLatLng(latlng)
+    .setContent(contenuto);
+  popupPunto.on("remove", () => segno.remove());
+  popupPunto.openOn(map);
+}
+
+const toccoLungo = creaRilevatore({
+  onLungo: ({ x, y }) => apriPuntoMappa(map.containerPointToLatLng([x, y])),
+});
+{
+  const contenitore = map.getContainer();
+  const dentroComando = (t) => t instanceof Element && t.closest(".leaflet-control, .leaflet-popup, .leaflet-marker-icon");
+  const punto = (e) => {
+    const r = contenitore.getBoundingClientRect();
+    return { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  contenitore.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (dentroComando(e.target)) return;
+    toccoLungo.giu(punto(e));
+  });
+  contenitore.addEventListener("pointermove", (e) => toccoLungo.muovi(punto(e)));
+  contenitore.addEventListener("pointerup", (e) => toccoLungo.su(punto(e)));
+  contenitore.addEventListener("pointercancel", (e) => toccoLungo.annullato(punto(e)));
+  // Il menu del browser (tasto destro, o pressione lunga di Android) lascia il posto al nostro riquadro.
+  contenitore.addEventListener("contextmenu", (e) => {
+    if (dentroComando(e.target)) return;
+    e.preventDefault();
+    toccoLungo.segnala();
+    const r = contenitore.getBoundingClientRect();
+    apriPuntoMappa(map.containerPointToLatLng([e.clientX - r.left, e.clientY - r.top]));
+  });
+}
+
+map.on("click", (e) => {
+  if (toccoLungo.clickSoppresso()) return;
+  if (popupPunto) map.closePopup(popupPunto);
+  impostaCentro(e.latlng.lat, e.latlng.lng);
+});
 $("btnCenterMap").addEventListener("click", () => {
   const c = map.getCenter();
   impostaCentro(c.lat, c.lng);
@@ -1473,6 +1587,7 @@ function avvia() {
   disegnaCategorie();
   iniziaWms();
   iniziaConfronto();
+  $("btnSpegni").addEventListener("click", spegniTutti);
   iniziaImp();
   mostraImp();
   aggiornaRete();

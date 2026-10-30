@@ -1,6 +1,6 @@
 // Varianti di richiesta per ortofoto e IGM. Esegui con: node tests/test-varianti.mjs
 import assert from "node:assert/strict";
-import { fusoPerLon, variantiPcn, variantiConPreferita, scegliVariante, fusoCambiato } from "../js/varianti.js";
+import { fusoPerLon, variantiPcn, variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva } from "../js/varianti.js";
 import { SOVRAPPOSIZIONI, urlTessera, WMS_PCN } from "../js/layers.js";
 import { tuttoTrasparente } from "../js/tessere.js";
 
@@ -75,6 +75,20 @@ test("urlTessera accetta la dimensione dell'immagine e la scrive in WIDTH e HEIG
   assert.match(urlTessera({ url: WMS_PCN, livelli: "x" }, 12, 1, 1), /WIDTH=256&HEIGHT=256/);
 });
 
+console.log("ingrandimento della prova");
+test("la prova parte dall'ingrandimento della mappa, dentro i limiti del livello, e poi sale", () => {
+  assert.deepEqual(zoomDiProva(16, { minZoom: 13, maxNativeZoom: 16 }), [16]);
+  assert.deepEqual(zoomDiProva(14, { minZoom: 13, maxNativeZoom: 16 }), [14, 15, 16]);
+  assert.deepEqual(zoomDiProva(8, { minZoom: 13, maxNativeZoom: 16 }), [13, 14, 15, 16]);
+  assert.deepEqual(zoomDiProva(19, { minZoom: 13, maxNativeZoom: 16 }), [16]);
+});
+test("i tentativi più alti sono al massimo tre", () => {
+  assert.equal(zoomDiProva(9, { minZoom: 9, maxNativeZoom: 18 }).length, 4);
+});
+test("senza limiti noti usa lo zoom della mappa", () => {
+  assert.deepEqual(zoomDiProva(15, {}), [15, 16, 17, 18]);
+});
+
 console.log("definizioni dei livelli");
 const per = (id) => SOVRAPPOSIZIONI.find((s) => s.id === id);
 test("ortofoto e IGM hanno una famiglia di livelli con i due fusi e uno zoom minimo", () => {
@@ -87,8 +101,10 @@ test("ortofoto e IGM hanno una famiglia di livelli con i due fusi e uno zoom min
     assert.ok(!per(id).livelli, `${id}: il livello lo decide la variante`);
   }
 });
-test("l'IGM 1:25.000 non si chiede da lontano (compare solo da vicino)", () => {
+test("l'IGM 1:25.000 non si chiede da lontano: il servizio non disegna sotto lo zoom 13 e ferma i dati al 16", () => {
   assert.ok(per("igm25").minZoom > per("igm100").minZoom);
+  assert.equal(per("igm25").minZoom, 13);
+  assert.equal(per("igm25").maxNativeZoom, 16);
 });
 test("ci sono il satellite storico Esri (quattro rilasci) e la carta topografica Esri", () => {
   for (const id of ["wb2014", "wb2018", "wb2022", "wb2026", "topoesri"]) {

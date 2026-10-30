@@ -10,6 +10,9 @@ import {
 } from "./visual.js";
 import { rileva, impostazioniPredefinite } from "./detect.js";
 import { confrontaConFoto } from "./confronto.js";
+import { dequantizza, passoDaLevigare } from "./dettaglio.js";
+
+export const LATO_IMMAGINE_MAX = 3072; // pixel per lato dell'immagine mostrata sulla mappa (con il sovracampionamento ×2)
 
 export const VISUALIZZAZIONI = [
   { id: "multi", nome: "Ombreggiatura multidirezionale" },
@@ -108,8 +111,19 @@ export function creaSessione() {
       await pausa();
       const r = riempiVuoti(g.dati, g.w, g.h);
       if (r.vuoto) throw new Error("Il rilievo non contiene quote valide attorno al centro. Sposta il centro o allarga il raggio.");
-      const rgba = calcolaImmagine(g, r.valido, r.pieno, p.vis ?? { tipo: "multi" }, impEff);
-      out.immagine = riproiettaPerMappa(rgba, g.w, g.h, g.cella, g.origine, g.proiezione, 2400);
+      // Il servizio dà il terreno a gradini (256 grigi): per la sola visualizzazione si tolgono, restando entro
+      // mezzo gradino dal dato (js/dettaglio.js). Il rilevatore di anomalie continua a lavorare sul dato vero.
+      let pieno = r.pieno;
+      const passo = meta.tipo === "servizio" && p.leviga !== false ? passoDaLevigare(meta) : 0;
+      if (passo > 0) {
+        avanzamento("Levigo i gradini del servizio…");
+        await pausa();
+        const l = dequantizza(r.pieno, r.valido, g.w, g.h, passo);
+        pieno = l.dati;
+        out.avvisi.push(`Gradini del servizio levigati per la visualizzazione (un livello = ${meta.relativo ? "1 livello di grigio" : passo.toFixed(2).replace(".", ",") + " m"}): le quote restano entro mezzo gradino dal dato.`);
+      }
+      const rgba = calcolaImmagine(g, r.valido, pieno, p.vis ?? { tipo: "multi" }, impEff);
+      out.immagine = riproiettaPerMappa(rgba, g.w, g.h, g.cella, g.origine, g.proiezione, LATO_IMMAGINE_MAX, { sovracampione: 2 });
       const t2 = Date.now();
 
       if (p.cercaAnomalie) {

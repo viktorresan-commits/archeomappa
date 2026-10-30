@@ -53,7 +53,7 @@ a, .link { color: var(--bosco-2); }
 /* ----------------------------------------------------------- struttura */
 .app { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: 100dvh; }
 .mapwrap { position: relative; min-height: 0; }
-#map { position: absolute; inset: 0; background: #cfd8d0; }
+#map { position: absolute; inset: 0; background: #cfd8d0; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 
 .topbar {
   position: absolute; z-index: 1000; top: max(10px, env(safe-area-inset-top)); left: 10px; right: 10px;
@@ -157,6 +157,10 @@ fieldset.checks legend { padding: 0 6px; font-weight: 500; font-size: 0.9rem; }
 .opt .stato.ko { border-color: var(--allarme); color: var(--allarme); }
 .opt .nota { display: block; font-size: 0.8rem; color: var(--muto); }
 .opt input[type="range"] { width: 90px; accent-color: var(--bosco); }
+.opt { flex-wrap: wrap; }
+.ord { display: flex; gap: 4px; flex: none; margin-left: auto; }
+.ordbtn { width: 40px; height: 40px; border: 1px solid var(--linea); border-radius: 8px; background: var(--pannello); color: var(--bosco); font-size: 0.95rem; cursor: pointer; padding: 0; }
+.ordbtn:disabled { opacity: 0.35; cursor: default; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0.5rem 0; }
 .chip {
@@ -205,6 +209,10 @@ ol.results { counter-reset: r; }
 .leaflet-popup-content .pm { color: #5b6b61; font-size: 0.82rem; }
 .pin { width: 26px; height: 26px; }
 .pin svg { display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
+.popupPunto .leaflet-popup-content { -webkit-user-select: text; user-select: text; }
+.pt-lungo .coord { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.95rem; margin: 4px 0 8px; word-break: break-all; }
+.pt-lungo .azioni { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pt-lungo .azioni .btn { flex: 1 1 auto; text-align: center; text-decoration: none; padding: 8px 10px; }
 .pinLabel { background: var(--bosco); color: #fff; border: 0; box-shadow: var(--ombra); font-size: 0.8rem; padding: 2px 8px; }
 .pinLabel::before { display: none; }
 .leaflet-control-attribution { font-size: 10px; }
@@ -234,4 +242,11 @@ ol.results { counter-reset: r; }
   position: absolute; left: 8px; right: 8px; bottom: 10px; z-index: 950; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 6px 8px; border-radius: var(--raggio); background: var(--pannello); box-shadow: var(--ombra);
 }
+/* tasto «Spegni tutto»: rotondo, una sola icona, in basso a sinistra della mappa sopra la scala */
+.fab {
+  position: absolute; z-index: 999; left: 10px; bottom: 40px; width: 48px; height: 48px; border: 0; border-radius: 50%;
+  background: var(--pannello); color: var(--bosco); box-shadow: var(--ombra); display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.fab:disabled { opacity: 0.45; cursor: default; }
+.fab.alto { bottom: 112px; }
 .cmpetichetta { flex: 1 1 160px; font-size: 0.85rem; font-weight: 600; }

@@ -1,7 +1,7 @@
 // Livelli del Ministero, adattamento http/https, proxy e client nativo. Esegui con: node tests/test-layers.mjs
 import assert from "node:assert/strict";
 import {
-  SOVRAPPOSIZIONI, WMS_PCN, PCN_HOST, ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlRegione, prodottiRegione, urlProva, creaLivello, urlTessera, tesseraDa,
+  SOVRAPPOSIZIONI, BASI, WMS_PCN, PCN_HOST, ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlRegione, prodottiRegione, urlProva, creaLivello, urlTessera, tesseraDa,
 } from "../js/layers.js";
 import { fetchNativo } from "../js/util.js";
 import { caricaCapabilities } from "../js/sources.js";
@@ -145,6 +145,69 @@ test("la nota dell'IGM spiega che l'errore sugli indici è del server del Minist
   assert.equal(igm.famiglia, "CB.IGM25000");
   assert.match(igm.nota, /msShapefileOpen/);
 });
+test("il LiDAR sulla mappa chiede le tessere al doppio dei pixel (512 per una tessera da 256)", () => {
+  const wms = { wmsParams: { width: 256, height: 256 } };
+  const L = { tileLayer: { wms: () => wms } };
+  creaLivello(L, lidar, { url: "http://x.example/ogc?map=a", livelli: "EL.LIDAR.MARCHE.1x1.DTM" });
+  assert.equal(lidar.risoluzione, 2);
+  assert.deepEqual([wms.wmsParams.width, wms.wmsParams.height], [512, 512]);
+});
+test("un livello senza «risoluzione» resta alla dimensione normale", () => {
+  const wms = { wmsParams: { width: 256, height: 256 } };
+  const L = { tileLayer: { wms: () => wms } };
+  creaLivello(L, SOVRAPPOSIZIONI.find((o) => o.id === "ortofoto"), { livelli: "OI.ORTOIMMAGINI.2012.33", versione: "1.3.0" });
+  assert.deepEqual([wms.wmsParams.width, wms.wmsParams.height], [256, 256]);
+});
+test("le «Ombre» usano TINITALY a 10 m (WMS 1.1.1, livello tinitaly_hshd, https) e Esri resta come ripiego", () => {
+  const o = SOVRAPPOSIZIONI.find((s) => s.id === "ombre");
+  assert.equal(o.tipo, "wms");
+  assert.equal(o.livelli, "tinitaly_hshd");
+  assert.equal(o.versione, "1.1.1");
+  assert.match(o.url, /^https:\/\/tinitaly\.pi\.ingv\.it\/TINItaly_1_1\/wms$/);
+  assert.equal(o.rapido, true);
+  assert.match(o.attr, /INGV/);
+  assert.match(o.attr, /CC BY 4\.0/);
+  const e = SOVRAPPOSIZIONI.find((s) => s.id === "ombre-esri");
+  assert.equal(e.tipo, "tile");
+  assert.ok(!e.rapido);
+  const p = parametri(urlProva(o.url, o.livelli, o.versione));
+  assert.equal(p.SRS, "EPSG:3857");
+  assert.equal(p.LAYERS, "tinitaly_hshd");
+});
+test("la richiesta TINITALY di prova è nello stesso formato di quella dell'app di riferimento", () => {
+  const o = SOVRAPPOSIZIONI.find((s) => s.id === "ombre");
+  const p = parametri(urlProva(o.url, o.livelli, o.versione));
+  assert.deepEqual([p.SERVICE, p.VERSION, p.REQUEST, p.LAYERS, p.STYLES, p.FORMAT, p.TRANSPARENT.toUpperCase()], ["WMS", "1.1.1", "GetMap", "tinitaly_hshd", "", "image/png", "TRUE"]);
+});
+
+console.log("mappe di base");
+test("ci sono otto mappe di base, con id unici, indirizzo con {z}/{x}/{y} e nome", () => {
+  assert.equal(BASI.length, 8);
+  assert.equal(new Set(BASI.map((b) => b.id)).size, BASI.length);
+  for (const b of BASI) {
+    assert.ok(b.nome && b.attr, b.id);
+    assert.match(b.url, /^https:\/\//, `${b.id}: https`);
+    assert.match(b.url, /\{z\}/); assert.match(b.url, /\{x\}/); assert.match(b.url, /\{y\}/);
+  }
+});
+test("le nuove basi libere ci sono: CyclOSM, OSM Umanitaria, CARTO Voyager e Positron, Sentinel-2 senza nuvole", () => {
+  const per = (id) => BASI.find((b) => b.id === id);
+  for (const id of ["cyclosm", "hot", "voyager", "positron", "s2"]) assert.ok(per(id), id);
+  assert.match(per("cyclosm").url, /tile-cyclosm\.openstreetmap\.fr\/cyclosm\//);
+  assert.match(per("hot").url, /tile\.openstreetmap\.fr\/hot\//);
+  assert.match(per("voyager").url, /basemaps\.cartocdn\.com\/rastertiles\/voyager\//);
+  assert.match(per("positron").url, /basemaps\.cartocdn\.com\/light_all\//);
+  assert.match(per("s2").url, /tiles\.maps\.eox\.at\/wmts\/1\.0\.0\/s2cloudless-2020_3857\/default\/g\/\{z\}\/\{y\}\/\{x\}\.jpg$/);
+  assert.match(per("s2").nota, /non commerciale/i);
+});
+test("le basi senza CORS non chiedono crossOrigin (altrimenti il browser le rifiuta); le altre sì", () => {
+  const visti = {};
+  const L = { tileLayer: (url, o) => { visti[url] = o; return {}; } };
+  for (const b of BASI) creaLivello(L, { ...b, tipo: "tile" });
+  for (const b of BASI) assert.equal(visti[b.url].crossOrigin, !b.senzaCors, b.id);
+  assert.ok(BASI.some((b) => b.senzaCors), "almeno una base senza CORS");
+});
+
 test("creaLivello passa versione e dimensione della tessera al WMS", () => {
   let visto = null;
   const L = { tileLayer: { wms: (url, o) => { visto = { url, o }; return {}; } } };

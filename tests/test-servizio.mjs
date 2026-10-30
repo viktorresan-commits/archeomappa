@@ -328,6 +328,31 @@ test("il motore (modalità thread) riapre il rilievo del servizio", async () => 
   assert.equal(m.modalita, "thread");
   await m.chiudi();
 });
+test("la visualizzazione dal servizio leviga i gradini a 8 bit e lo dice; si può disattivare", async () => {
+  const g = await griglia({ modo: "fisso" });
+  assert.ok(g.passoM > 0.4 && g.passoM < 0.6, `gradino ${g.passoM}`);
+  const s = creaSessione();
+  await s.apriPixel(g);
+  const con = await s.analizza({ lat: LAT, lon: LON, raggioM: 300, vis: { tipo: "multi", esagerazione: 2 } });
+  assert.ok(con.avvisi.some((a) => /Gradini del servizio levigati.*0,5\d m/.test(a)), con.avvisi.join(" | "));
+  const senza = await s.analizza({ lat: LAT, lon: LON, raggioM: 300, vis: { tipo: "multi", esagerazione: 2 }, leviga: false });
+  assert.ok(!senza.avvisi.some((a) => /levigati/.test(a)));
+  // le due immagini hanno la stessa forma ma non gli stessi pixel
+  assert.equal(con.immagine.w, senza.immagine.w);
+  let diversi = 0;
+  for (let i = 0; i < con.immagine.rgba.length; i += 4 * 97) if (Math.abs(con.immagine.rgba[i] - senza.immagine.rgba[i]) > 2) diversi++;
+  assert.ok(diversi > 20, `${diversi} campioni diversi`);
+});
+test("l'immagine sulla mappa ha il doppio dei pixel del rilievo (entro il tetto) e non perde la copertura", async () => {
+  const g = await griglia({ modo: "fisso" });
+  const s = creaSessione();
+  await s.apriPixel(g);
+  const r = await s.analizza({ lat: LAT, lon: LON, raggioM: 300, vis: { tipo: "ombre" } });
+  assert.ok(r.immagine.w >= r.griglia.w * 1.8 && r.immagine.w <= 3072, `${r.griglia.w} → ${r.immagine.w}`);
+  let opachi = 0;
+  for (let i = 3; i < r.immagine.rgba.length; i += 4) if (r.immagine.rgba[i] > 200) opachi++;
+  assert.ok(opachi / (r.immagine.w * r.immagine.h) > 0.8, `${opachi / (r.immagine.w * r.immagine.h)}`);
+});
 test("metaDaPixel: la copertura è la finestra scaricata", async () => {
   const g = await griglia({ modo: "fisso" });
   const m = metaDaPixel(g);

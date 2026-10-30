@@ -28,6 +28,59 @@ export const BASI = [
     maxZoom: 19,
     attr: "Immagini © Esri, Maxar, Earthstar Geographics",
   },
+  // Altre mappe di base libere, costruite su dati OpenStreetMap o su immagini Copernicus. Non si chiede il CORS
+  // (senzaCors): si vedono comunque; non si salvano nella cache offline, ma non si rischia che una tessera sparisca
+  // perché il server non manda l'intestazione.
+  {
+    id: "cyclosm",
+    nome: "CyclOSM (sentieri e curve di livello)",
+    nota: "Mappa libera costruita su OpenStreetMap: sentieri, mulattiere, curve di livello.",
+    url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+    subdomains: "abc",
+    maxZoom: 19,
+    senzaCors: true,
+    attr: "© collaboratori di OpenStreetMap | CyclOSM (OSM France)",
+  },
+  {
+    id: "hot",
+    nome: "OpenStreetMap Umanitaria (HOT)",
+    nota: "Stile libero con colori netti per strade e abitati; ottima alla scala del paese.",
+    url: "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+    subdomains: "abc",
+    maxZoom: 19,
+    senzaCors: true,
+    attr: "© collaboratori di OpenStreetMap | stile Humanitarian OpenStreetMap Team, server OSM France",
+  },
+  {
+    id: "voyager",
+    nome: "CARTO Voyager (chiara)",
+    nota: "Dati OpenStreetMap con uno stile chiaro e leggibile.",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    subdomains: "abcd",
+    maxZoom: 20,
+    senzaCors: true,
+    attr: "© collaboratori di OpenStreetMap © CARTO",
+  },
+  {
+    id: "positron",
+    nome: "CARTO Positron (grigio chiaro)",
+    nota: "Fondo quasi bianco: fa risaltare i livelli sovrapposti (LiDAR, IGM, catasto).",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    subdomains: "abcd",
+    maxZoom: 20,
+    senzaCors: true,
+    attr: "© collaboratori di OpenStreetMap © CARTO",
+  },
+  {
+    id: "s2",
+    nome: "Sentinel-2 senza nuvole (EOX)",
+    nota: "Immagini Copernicus a 10 m per pixel, un mosaico 2020 senza nuvole: aperte, ma lontane quanto a dettaglio. Uso non commerciale.",
+    url: "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
+    maxNativeZoom: 14,
+    maxZoom: 19,
+    senzaCors: true,
+    attr: "Sentinel-2 cloudless 2020 di EOX IT Services GmbH (contiene dati Copernicus Sentinel modificati 2020) – s2maps.eu",
+  },
 ];
 
 export const PCN_HOST = "wms.pcn.minambiente.it";
@@ -74,16 +127,31 @@ export function urlPerAmbiente(url, { amb = ambiente(), proxy = "" } = {}) {
 export const SOVRAPPOSIZIONI = [
   {
     id: "ombre",
-    nome: "Rilievo ombreggiato",
+    nome: "Rilievo ombreggiato (TINITALY 10 m)",
+    tipo: "wms",
+    // Modello del terreno dell'INGV a 10 m su tutta l'Italia: tre volte più fine dell'ombreggiatura Esri (circa 30 m).
+    url: "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms",
+    livelli: "tinitaly_hshd",
+    versione: "1.1.1",
+    maxNativeZoom: 15,
+    risoluzione: 2, // tessere richieste al doppio dei pixel: ombre più nitide
+    opacita: 0.55,
+    rapido: true,
+    etichettaRapida: "Ombre",
+    attr: "Rilievo ombreggiato: TINITALY/1.1 © INGV (CC BY 4.0), Tarquini et al. 2023",
+    nota: "Aiuta a leggere terrazzamenti, argini e fossati a scala di paesaggio; il pixel è di 10 m, quindi non mostra strutture piccole (per quelle serve il LiDAR). Se il servizio non risponde usa «Rilievo ombreggiato (Esri)».",
+    daVerificare: true,
+  },
+  {
+    id: "ombre-esri",
+    nome: "Rilievo ombreggiato (Esri)",
     tipo: "tile",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}",
     maxNativeZoom: 13,
     maxZoom: 19,
     opacita: 0.5,
-    rapido: true,
-    etichettaRapida: "Ombre",
     attr: "Rilievo © Esri",
-    nota: "Aiuta a leggere terrazzamenti, argini e fossati. Non è LiDAR.",
+    nota: "Ombreggiatura mondiale, meno fine di TINITALY: resta come ripiego.",
   },
   {
     id: "catasto",
@@ -124,13 +192,13 @@ export const SOVRAPPOSIZIONI = [
     tipo: "wms",
     url: WMS_PCN + "raster/IGM_25000.map",
     famiglia: "CB.IGM25000",
-    minZoom: 12, // la carta 1:25.000 compare solo da vicino
-    maxNativeZoom: 17,
+    minZoom: 13, // sotto lo zoom 13 il servizio non disegna nulla (lo riferiscono anche gli utenti di altre app)
+    maxNativeZoom: 16, // lo zoom 17 è solo il 16 ingrandito
     opacita: 0.9,
     rapido: true,
     etichettaRapida: "IGM",
     attr: "© Istituto Geografico Militare – Geoportale Nazionale",
-    nota: "Cartografia storica: toponimi utili per ricerche d'archivio. Compare solo da zoom 12. Se il server del Ministero ha un guasto sui file degli indici (errore msShapefileOpen), l'app lo mostra com'è: non si può riparare da qui.",
+    nota: "Cartografia storica: toponimi utili per ricerche d'archivio. Compare solo da zoom 13. Se il server del Ministero ha un guasto sui file degli indici (errore msShapefileOpen), l'app lo mostra com'è: non si può riparare da qui.",
     daVerificare: true,
   },
   {
@@ -201,11 +269,12 @@ export const SOVRAPPOSIZIONI = [
     ],
     versione: "1.1.1",
     maxNativeZoom: 17,
+    risoluzione: 2, // tessere richieste al doppio dei pixel: a scala larga il servizio non «salta» i pixel e a schermo risulta più nitido
     opacita: 0.8,
     rapido: true,
     etichettaRapida: "LiDAR",
     attr: "© MASE – Piano Straordinario di Telerilevamento Ambientale (CC BY 4.0)",
-    nota: "Per ora Marche e Umbria. Il servizio del Ministero è raggiungibile in http: nell'app Android funziona, dal sito (https) serve un proxy (vedi sotto) oppure carica un file nella scheda Rilievo.",
+    nota: "Per ora Marche e Umbria. È l'immagine che il Ministero produce (256 grigi, senza ombre): per vedere il terreno nitido, in metri e con le ombre usa la scheda Rilievo. Il servizio è raggiungibile in http: nell'app Android funziona, dal sito (https) serve un proxy (vedi sotto) oppure carica un file nella scheda Rilievo.",
     daVerificare: true,
   },
 ];
@@ -238,7 +307,7 @@ export function creaLivello(L, def, { livelli, url, versione, tileSize } = {}) {
       ...comuni,
       subdomains: def.subdomains ?? "abc",
       maxNativeZoom: def.maxNativeZoom,
-      crossOrigin: true, // risposte non opache: la cache offline le può conservare
+      crossOrigin: !def.senzaCors, // risposte non opache: la cache offline le può conservare (salvo le mappe che non mandano il CORS)
     });
   }
   if (def.maxNativeZoom) comuni.maxNativeZoom = def.maxNativeZoom;
@@ -252,13 +321,16 @@ export function creaLivello(L, def, { livelli, url, versione, tileSize } = {}) {
     });
     return new Capa("", comuni);
   }
-  return L.tileLayer.wms(url ?? def.url, {
+  const wms = L.tileLayer.wms(url ?? def.url, {
     ...comuni,
     layers: livelli ?? def.livelli,
     format: "image/png",
     transparent: true,
     version: versione ?? def.versione ?? "1.3.0",
   });
+  // Più pixel per tessera di quelli mostrati (il browser li riduce): meno scatti a scala larga, più nitidezza sugli schermi ad alta densità
+  if (def.risoluzione > 1 && wms.wmsParams) wms.wmsParams.width = wms.wmsParams.height = Math.round((tileSize ?? 256) * def.risoluzione);
+  return wms;
 }
 
 // ---------------------------------------------------------- tessere

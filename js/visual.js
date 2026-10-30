@@ -207,30 +207,62 @@ export function coloraVisualizzazione(tipo, v, valido, w, h, opzioni = {}) {
 
 // ---------------------------------------------------------- per la mappa
 
+const PASSO_RETICOLO = 16; // la proiezione si calcola ogni 16 pixel e fra i nodi si interpola (errore < 1/1000 di pixel)
+
 /**
  * Riproietta un'immagine RGBA dalla griglia UTM a una griglia uniforme in Web Mercator,
  * così Leaflet la sovrappone senza sfasamenti. Restituisce {rgba, w, h, bounds:[[sud,ovest],[nord,est]]}.
+ * Il campionamento è bilineare (colore pesato dall'opacità, così i bordi non si sporcano) e non per
+ * pixel più vicino: i tratti dritti non fanno la scala di gradini che nasce dalla rotazione fra UTM e Mercatore.
+ * `sovracampione` > 1 produce più pixel di quelli di partenza (fino a `maxLato`), per un'immagine liscia
+ * anche a forte ingrandimento.
  */
-export function riproiettaPerMappa(rgba, w, h, cella, origine, proiezione, maxLato = 2400) {
+export function riproiettaPerMappa(rgba, w, h, cella, origine, proiezione, maxLato = 2400, { sovracampione = 1 } = {}) {
   const angoli = [[0, 0], [w, 0], [w, h], [0, h]].map(([c, r]) => proiezione.aLatLon(origine.x + c * cella, origine.y - r * cella));
   const lats = angoli.map((a) => a[0]), lons = angoli.map((a) => a[1]);
   const sud = Math.min(...lats), nord = Math.max(...lats), ovest = Math.min(...lons), est = Math.max(...lons);
   const [xO] = mercatoreDiretta(sud, ovest), [xE, yN] = mercatoreDiretta(nord, est), [, yS] = mercatoreDiretta(sud, ovest);
   const larg = xE - xO, alt = yN - yS;
-  const scala = Math.min(1, maxLato / Math.max(w, h));
+  const scala = Math.max(0.05, Math.min(Math.max(1, sovracampione), maxLato / Math.max(w, h)));
   const w2 = Math.max(2, Math.round(Math.max(w, h) * scala * (larg >= alt ? 1 : larg / alt)));
   const h2 = Math.max(2, Math.round(w2 * (alt / larg)));
   const out = new Uint8ClampedArray(w2 * h2 * 4);
-  for (let r2 = 0; r2 < h2; r2++) {
-    const y = yN - ((r2 + 0.5) / h2) * alt;
+
+  // Nodi del reticolo: coordinate UTM (in pixel della sorgente) di alcuni punti dell'immagine di arrivo.
+  const nc = Math.ceil(w2 / PASSO_RETICOLO) + 1, nr = Math.ceil(h2 / PASSO_RETICOLO) + 1;
+  const nodiC = new Float64Array(nc * nr), nodiR = new Float64Array(nc * nr);
+  for (let j = 0; j < nr; j++) {
+    const y = yN - (Math.min(h2, j * PASSO_RETICOLO) / h2) * alt;
     const lat = mercatoreInversa(0, y)[0];
-    for (let c2 = 0; c2 < w2; c2++) {
-      const lon = ovest + ((c2 + 0.5) / w2) * (est - ovest);
+    for (let i = 0; i < nc; i++) {
+      const lon = ovest + (Math.min(w2, i * PASSO_RETICOLO) / w2) * (est - ovest);
       const [X, Y] = proiezione.daLatLon(lat, lon);
-      const c = Math.floor((X - origine.x) / cella), r = Math.floor((origine.y - Y) / cella);
-      if (c < 0 || r < 0 || c >= w || r >= h) continue;
-      const s = (r * w + c) * 4, d = (r2 * w2 + c2) * 4;
-      out[d] = rgba[s]; out[d + 1] = rgba[s + 1]; out[d + 2] = rgba[s + 2]; out[d + 3] = rgba[s + 3];
+      nodiC[j * nc + i] = (X - origine.x) / cella - 0.5; // posizione fra i centri dei pixel sorgente
+      nodiR[j * nc + i] = (origine.y - Y) / cella - 0.5;
+    }
+  }
+
+  for (let r2 = 0; r2 < h2; r2++) {
+    const fj = (r2 + 0.5) / PASSO_RETICOLO, j = Math.min(nr - 2, Math.floor(fj)), tj = fj - j;
+    for (let c2 = 0; c2 < w2; c2++) {
+      const fi = (c2 + 0.5) / PASSO_RETICOLO, i = Math.min(nc - 2, Math.floor(fi)), ti = fi - i;
+      const k = j * nc + i;
+      const fc = (1 - tj) * ((1 - ti) * nodiC[k] + ti * nodiC[k + 1]) + tj * ((1 - ti) * nodiC[k + nc] + ti * nodiC[k + nc + 1]);
+      const fr = (1 - tj) * ((1 - ti) * nodiR[k] + ti * nodiR[k + 1]) + tj * ((1 - ti) * nodiR[k + nc] + ti * nodiR[k + nc + 1]);
+      if (fc < -0.5 || fr < -0.5 || fc > w - 0.5 || fr > h - 0.5) continue;
+      const c0 = Math.floor(fc), r0 = Math.floor(fr), tc = fc - c0, tr = fr - r0;
+      const ca = c0 < 0 ? 0 : c0, cb = c0 + 1 > w - 1 ? w - 1 : c0 + 1;
+      const ra = r0 < 0 ? 0 : r0, rb = r0 + 1 > h - 1 ? h - 1 : r0 + 1;
+      const s00 = (ra * w + ca) * 4, s01 = (ra * w + cb) * 4, s10 = (rb * w + ca) * 4, s11 = (rb * w + cb) * 4;
+      const w00 = (1 - tc) * (1 - tr) * rgba[s00 + 3], w01 = tc * (1 - tr) * rgba[s01 + 3];
+      const w10 = (1 - tc) * tr * rgba[s10 + 3], w11 = tc * tr * rgba[s11 + 3];
+      const A = w00 + w01 + w10 + w11;
+      if (A <= 0) continue;
+      const d = (r2 * w2 + c2) * 4;
+      out[d] = (w00 * rgba[s00] + w01 * rgba[s01] + w10 * rgba[s10] + w11 * rgba[s11]) / A;
+      out[d + 1] = (w00 * rgba[s00 + 1] + w01 * rgba[s01 + 1] + w10 * rgba[s10 + 1] + w11 * rgba[s11 + 1]) / A;
+      out[d + 2] = (w00 * rgba[s00 + 2] + w01 * rgba[s01 + 2] + w10 * rgba[s10 + 2] + w11 * rgba[s11 + 2]) / A;
+      out[d + 3] = A;
     }
   }
   return { rgba: out, w: w2, h: h2, bounds: [[sud, ovest], [nord, est]] };

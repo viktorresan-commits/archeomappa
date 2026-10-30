@@ -45,3 +45,15 @@ export function scegliVariante(esiti) {
 
 /** La variante scelta chiede un solo fuso e il centro della mappa è passato nell'altro: conviene sceglierla di nuovo. */
 export const fusoCambiato = (variante, lon) => !!variante && variante.fuso != null && variante.fuso !== fusoPerLon(lon);
+
+/**
+ * Ingrandimenti a cui provare i formati di richiesta: si parte da quello della mappa (dentro i limiti del livello)
+ * e si sale. Serve perché sotto l'ingrandimento a cui il servizio disegna davvero ogni formato «risponde»
+ * con un'immagine vuota, e la prova non distingue quello giusto da quello sbagliato.
+ */
+export function zoomDiProva(zMappa, { minZoom = 0, maxNativeZoom = 19 } = {}, tentativiInPiu = 3) {
+  const z0 = Math.max(minZoom, Math.min(zMappa, maxNativeZoom));
+  const zoom = [z0];
+  for (let k = 1; k <= tentativiInPiu && z0 + k <= maxNativeZoom; k++) zoom.push(z0 + k);
+  return zoom;
+}

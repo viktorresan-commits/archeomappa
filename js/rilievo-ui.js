@@ -12,7 +12,7 @@ import { ELENCO_RIFERIMENTI, fonteRiferimento, scaricaMosaico, zoomUtilizzabile 
 import { mercatoreDiretta } from "./proj.js";
 import { cercaSitiOSM, cercaEdificiStrade, CATEGORIE } from "./sources.js";
 import { formatDist, haversine } from "./geo.js";
-import { scaricaFinestra, scaricaImmagine } from "./lidar-servizio.js";
+import { scaricaFinestra, scaricaImmagine, LATO_MAX as LATO_SERVIZIO } from "./lidar-servizio.js";
 
 const SISTEMI = [
   [32632, "UTM 32N WGS84 (EPSG:32632)"], [32633, "UTM 33N WGS84 (EPSG:32633)"], [32634, "UTM 34N WGS84 (EPSG:32634)"],
@@ -75,7 +75,7 @@ function dentroCopertura(c, cop) {
 export function iniziaRilievo(ctx) {
   const { map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro, impostaCentro, fmtCoord, gen, pubblica, metaEsportazione, nomeFile, cerchio, sorgenteLidar, fonteLidar, cambiaFonteLidar, fonteWmsOrtofoto } = ctx;
   const motore = creaMotore();
-  const base = { raggioKm: 1, vis: "multi", esag: 2, opacita: 75, epsg: 32632, rif: "sat", overrides: {} };
+  const base = { raggioKm: 1, vis: "multi", esag: 2, opacita: 75, epsg: 32632, rif: "sat", leviga: true, overrides: {} };
   const salvato = { ...base, ...mem.get("am.rilievo", {}) };
   salvato.overrides = { dettaglio: {}, grossolano: {}, ...salvato.overrides };
   const salva = () => mem.set("am.rilievo", salvato);
@@ -210,6 +210,7 @@ export function iniziaRilievo(ctx) {
       const opzioni = asc || epsg ? { epsg: epsg ?? Number($("relEpsg").value) } : {};
       const i = await motore.apri(f, opzioni);
       file = f; info = i; modo = "file"; scaricato = null;
+      aggiornaEtichette();
       box.hidden = !asc;
       pulisciRisultati();
       togliImmagine();
@@ -244,6 +245,7 @@ export function iniziaRilievo(ctx) {
 
   function tornaAlServizio() {
     modo = "servizio"; file = null; info = null; scaricato = null;
+    aggiornaEtichette();
     $("relFile").value = ""; $("relCrsBox").hidden = true;
     pulisciRisultati(); togliImmagine(); disegnaCopertura(); mostraInfo(); disegnaImpostazioni(); abilita(); aggiornaFonte();
     stato("relStatus", "Uso di nuovo il LiDAR del servizio.");
@@ -337,7 +339,7 @@ export function iniziaRilievo(ctx) {
       const r = await motore.analizza({
         lat: c.lat, lon: c.lon, raggioM,
         vis: { tipo: salvato.vis, esagerazione: salvato.esag },
-        cercaAnomalie: cerca, imp: { ...sovrascritti() }, esterni,
+        cercaAnomalie: cerca, imp: { ...sovrascritti() }, esterni, leviga: salvato.leviga !== false,
       }, (testo) => stato("relStatus", testo));
       await mostraImmagine(r.immagine);
       const parti = [];
@@ -550,8 +552,11 @@ export function iniziaRilievo(ctx) {
   $("relEpsg").value = String(salvato.epsg);
   $("relRadius").value = String(salvato.raggioKm);
   $("relOpacity").value = String(salvato.opacita);
+  $("relLeviga").checked = salvato.leviga !== false;
   const aggiornaEtichette = () => {
-    $("relRadiusOut").textContent = `${fmtNum(salvato.raggioKm, 2)} km`;
+    // Dal servizio l'area è al massimo di 2400 pixel per lato: oltre 1,2 km di raggio il pixel supera il metro
+    const pixel = modo === "servizio" ? Math.max(1, (2 * salvato.raggioKm * 1000) / LATO_SERVIZIO) : null;
+    $("relRadiusOut").textContent = `${fmtNum(salvato.raggioKm, 2)} km${pixel ? ` · pixel da ${fmtNum(pixel, pixel < 1.05 ? 0 : 1)} m` : ""}`;
     $("relOpacityOut").textContent = `${salvato.opacita}%`;
   };
   aggiornaEtichette();
@@ -571,6 +576,7 @@ export function iniziaRilievo(ctx) {
   });
   $("relVis").addEventListener("change", (e) => { salvato.vis = e.target.value; salva(); if (overlay && info && !inCorso) esegui(false); });
   $("relEsag").addEventListener("change", (e) => { salvato.esag = Number(e.target.value); salva(); if (overlay && info && !inCorso) esegui(false); });
+  $("relLeviga").addEventListener("change", (e) => { salvato.leviga = e.target.checked; salva(); if (overlay && info && !inCorso) esegui(false); });
   $("relOpacity").addEventListener("input", (e) => {
     salvato.opacita = Number(e.target.value); salva(); aggiornaEtichette(); overlay?.setOpacity(salvato.opacita / 100);
   });
