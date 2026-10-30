@@ -1,0 +1,87 @@
+# Costruisce l'app Android (APK) di ArcheoMappa Italia con Capacitor.
+# L'app ha la stessa impostazione di altre app Capacitor che caricano i servizi del Ministero:
+# apre le pagine su http://localhost e consente il traffico http, così il LiDAR del Geoportale
+# nazionale si carica anche se il sito su GitHub Pages (https) non può farlo.
+# Parte da solo quando cambiano i file dell'app, oppure a mano da Actions → «APK Android» → Run workflow.
+# Il risultato è nella pagina «Releases» del progetto (versione «apk-ultimo»).
+name: APK Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "manifest.json"
+      - "css/**"
+      - "js/**"
+      - "icons/**"
+      - "apk/**"
+      - ".github/workflows/apk.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  costruisci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Installa Capacitor e Leaflet
+        working-directory: apk
+        run: npm install --no-audit --no-fund
+
+      - name: Prepara i file dell'app
+        working-directory: apk
+        run: node prepara-www.mjs
+
+      - name: Crea il progetto Android
+        working-directory: apk
+        run: |
+          npx cap add android
+          BUILD_NUMBER=${{ github.run_number }} node applica-android.mjs
+          npx cap sync android
+
+      - name: Chiave di firma (di prova, uguale a ogni costruzione)
+        run: |
+          mkdir -p ~/.android
+          cp apk/debug.keystore ~/.android/debug.keystore
+
+      - name: Costruisci l'APK
+        working-directory: apk/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Dai all'APK un nome chiaro
+        run: cp apk/android/app/build/outputs/apk/debug/app-debug.apk ArcheoMappa-Italia.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArcheoMappa-Italia-apk
+          path: ArcheoMappa-Italia.apk
+
+      - name: Pubblica l'APK nelle Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-ultimo --yes --cleanup-tag || true
+          gh release create apk-ultimo ArcheoMappa-Italia.apk \
+            --target "${{ github.sha }}" \
+            --title "ArcheoMappa Italia: app Android (ultima versione)" \
+            --notes "APK di prova, firmato con una chiave di sviluppo. Per installarlo il telefono chiede di consentire l'installazione da questa fonte. Costruito dal commit ${{ github.sha }}."

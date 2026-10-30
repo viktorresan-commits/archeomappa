@@ -9,12 +9,13 @@ import {
   wikipediaVicino, wikipediaCerca, commonsCerca, commonsVicino, archiveCerca, europeanaCerca,
 } from "./sources.js";
 import {
-  BASI, SOVRAPPOSIZIONI, SERVIZI_NOTI, creaLivello, risolviLivelli, provaServizio, urlRegione,
+  BASI, SOVRAPPOSIZIONI, SERVIZI_NOTI, creaLivello, risolviLivelli, provaServizio, urlRegione, prodottiRegione,
+  ambiente, normalizzaProxy, urlPerAmbiente, usaPcn,
 } from "./layers.js";
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
 
-const VERSIONE = "0.2.1";
+const VERSIONE = "0.2.2";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -149,6 +150,8 @@ function disegnaBasi() {
 // ------------------------------------------------------------ livelli sovrapposti
 
 const sovr = new Map(); // id -> { def, layer, on, opacita, stato }
+const adattaUrl = (url) => urlPerAmbiente(url, { proxy: mem.get("am.proxyPcn", "") });
+const nomeRegione = (x) => x.replaceAll("_", " ").toLowerCase().replace(/^\w|\s\w/g, (m) => m.toUpperCase());
 const salvati = mem.get("am.sovr", {});
 const personalizzati = mem.get("am.wmsCustom", []);
 
@@ -162,7 +165,7 @@ function registraSovr(def) {
     wantOn: !!s.on,
     stato: def.daVerificare ? "da verificare" : "",
     errori: 0,
-    urlEffettivo: def.url,
+    urlEffettivo: adattaUrl(def.url),
     livelliEffettivi: def.livelli,
   });
 }
@@ -175,18 +178,48 @@ function salvaSovr() {
   mem.set("am.sovr", o);
 }
 
+/** Prima le regioni di cui si conoscono i livelli, poi le altre in ordine alfabetico. */
+function elencoRegioni(d) {
+  const note = d.regioni.filter((x) => d.prodotti?.[x]);
+  const altre = d.regioni.filter((x) => !d.prodotti?.[x]).sort();
+  return [
+    ...note.map((x) => ({ etichetta: nomeRegione(x), valore: x })),
+    ...altre.map((x) => ({ etichetta: `${nomeRegione(x)} (da verificare)`, valore: x })),
+  ];
+}
+
+function messaggioTessere(r) {
+  if (usaPcn(r.urlEffettivo) && !ambiente().httpConsentito) {
+    return `«${r.def.nome}»: il servizio del Ministero non risponde da una pagina https. Usa l'app Android oppure imposta un proxy (riquadro «Servizi del Ministero» qui sotto).`;
+  }
+  return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento.`;
+}
+
 let zCont = 10;
 async function costruisciLivelloSovr(r) {
   const d = r.def;
   if (d.tipo === "wms-regione") {
-    const scelta = mem.get("am.lidarRegione", null);
-    const regione = scelta ?? (await scegli("Scegli la regione", d.regioni.map((x) => ({ etichetta: x.replaceAll("_", " ").toLowerCase().replace(/^\w|\s\w/g, (m) => m.toUpperCase()), valore: x }))));
+    const regione = mem.get("am.lidarRegione", null) ?? (await scegli("Scegli la regione", elencoRegioni(d)));
     if (!regione) return null;
-    r.urlEffettivo = urlRegione(d, regione);
-    toast("Leggo i livelli del servizio…");
-    r.livelliEffettivi = await risolviLivelli({ scegli: /lidar|dtm|dsm|ombr|hillshade/i }, r.urlEffettivo);
+    r.urlEffettivo = adattaUrl(urlRegione(d, regione));
+    const prodotti = prodottiRegione(d, regione);
+    let prodotto = null;
+    if (prodotti.length) {
+      const salvato = mem.get("am.lidarLivello", null);
+      prodotto = prodotti.find((p) => p.livello === salvato) ?? (prodotti.length === 1 ? prodotti[0] : null);
+      if (!prodotto) {
+        const scelto = await scegli("Quale livello?", prodotti.map((q) => ({ etichetta: q.nome, valore: q.livello })));
+        prodotto = prodotti.find((p) => p.livello === scelto) ?? null;
+      }
+      if (!prodotto) return null;
+      r.livelliEffettivi = prodotto.livello;
+      mem.set("am.lidarLivello", prodotto.livello);
+    } else {
+      toast("Leggo i livelli del servizio…");
+      r.livelliEffettivi = await risolviLivelli({ scegli: /lidar|dtm|dsm|ombr|hillshade/i }, r.urlEffettivo);
+    }
     mem.set("am.lidarRegione", regione);
-    r.stato = "regione: " + regione.replaceAll("_", " ").toLowerCase();
+    r.stato = `${nomeRegione(regione)}${prodotto ? " – " + prodotto.nome.replace(/ \(consigliato\)/, "") : ""}`;
   } else if (d.tipo === "wms" && !r.livelliEffettivi) {
     toast("Leggo i livelli del servizio…");
     r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
@@ -196,7 +229,7 @@ async function costruisciLivelloSovr(r) {
   layer.setZIndex(++zCont);
   if (d.tipo !== "tile") {
     layer.on("tileerror", () => {
-      if (++r.errori === 4) toast(`«${d.nome}» non risponde in quest'area o a questo ingrandimento.`);
+      if (++r.errori === 4) toast(messaggioTessere(r), 9000);
     });
     layer.on("tileload", () => { r.errori = 0; });
   }
@@ -235,6 +268,60 @@ async function alternaSovr(r, casella) {
   }
 }
 
+async function cambiaRegione(r) {
+  if (r.layer) map.removeLayer(r.layer);
+  r.layer = null;
+  r.on = false;
+  r.stato = "";
+  mem.del("am.lidarRegione");
+  mem.del("am.lidarLivello");
+  disegnaSovr();
+  const cb = $("ov-" + r.def.id);
+  cb.checked = true;
+  await alternaSovr(r, cb);
+}
+
+/** Il proxy è cambiato: i livelli del Ministero vanno ricostruiti con il nuovo indirizzo. */
+function riapplicaProxy() {
+  const daRiaccendere = [];
+  for (const r of sovr.values()) {
+    if (!(r.def.tipo === "wms-regione" || usaPcn(r.def.url))) continue;
+    if (r.on) daRiaccendere.push(r);
+    if (r.layer) map.removeLayer(r.layer);
+    r.layer = null;
+    r.on = false;
+    r.errori = 0;
+    r.urlEffettivo = adattaUrl(r.def.url);
+    r.livelliEffettivi = r.def.livelli;
+  }
+  disegnaSovr();
+  for (const r of daRiaccendere) {
+    const cb = $("ov-" + r.def.id);
+    cb.checked = true;
+    alternaSovr(r, cb);
+  }
+}
+
+function iniziaProxy() {
+  const campo = $("proxyPcn");
+  const msg = $("proxyMsg");
+  if (ambiente().nativa) $("boxProxy").hidden = true; // nell'app Android non serve
+  campo.value = mem.get("am.proxyPcn", "");
+  const applica = (valore) => {
+    const v = normalizzaProxy(valore);
+    if (valore.trim() && !v) {
+      msg.textContent = "L'indirizzo deve essere completo e iniziare con https://";
+      return;
+    }
+    if (v) mem.set("am.proxyPcn", v); else mem.del("am.proxyPcn");
+    campo.value = v;
+    riapplicaProxy();
+    msg.textContent = v ? "Proxy salvato: i livelli del Ministero ora passano da lì." : "Proxy tolto.";
+  };
+  $("btnProxy").addEventListener("click", () => applica(campo.value));
+  $("btnProxyNo").addEventListener("click", () => applica(""));
+}
+
 function rimuoviPersonalizzato(r) {
   if (r.layer) map.removeLayer(r.layer);
   sovr.delete(r.def.id);
@@ -263,6 +350,9 @@ function disegnaSovr() {
             })
           : null,
         r.def.custom ? h("button", { type: "button", class: "link", "aria-label": `Rimuovi ${r.def.nome}`, onclick: () => rimuoviPersonalizzato(r) }, "Rimuovi") : null,
+        r.def.tipo === "wms-regione" && mem.get("am.lidarRegione", null)
+          ? h("button", { type: "button", class: "link", onclick: () => cambiaRegione(r) }, "Cambia zona o livello")
+          : null,
       );
     }),
   );
@@ -277,9 +367,18 @@ async function verificaServizi() {
   await Promise.all(wms.map(async (r) => {
     try {
       if (r.def.tipo === "wms-regione" && !r.layer) { r.stato = "scegli la regione"; return; }
-      const livelli = r.livelliEffettivi ?? (await risolviLivelli(r.def, r.urlEffettivo));
+      let livelli = r.livelliEffettivi;
+      if (!livelli) {
+        try {
+          livelli = await risolviLivelli(r.def, r.urlEffettivo);
+        } catch {
+          r.stato = "non verificabile"; // l'elenco dei livelli non è leggibile dal browser: non è detto che il servizio sia fermo
+          return;
+        }
+      }
       r.livelliEffettivi = livelli;
-      const esito = await provaServizio(r.urlEffettivo, livelli, r.def.versione ?? "1.3.0");
+      const raggio = (r.def.minZoom ?? 0) >= 15 ? 250 : 20000; // il catasto risponde solo a scala di dettaglio
+      const esito = await provaServizio(r.urlEffettivo, livelli, r.def.versione ?? "1.3.0", 15000, raggio);
       r.stato = esito === "ok" ? "risponde" : "non risponde";
       if (esito === "ok") ok++;
     } catch {
@@ -288,12 +387,14 @@ async function verificaServizi() {
   }));
   disegnaSovr();
   occupato(btn, false);
-  $("probeMsg").textContent = `${ok} su ${wms.length} rispondono. «Risponde» non garantisce che ci siano dati in ogni zona.`;
+  const nv = wms.filter((r) => r.stato === "non verificabile").length;
+  $("probeMsg").textContent = `${ok} su ${wms.length} rispondono${nv ? `, ${nv} non ${nv === 1 ? "verificabile" : "verificabili"} da qui` : ""}. «Risponde» non garantisce che ci siano dati in ogni zona.`;
 }
 
 // ---------------------------------------------------------- servizio WMS manuale
 
 function iniziaWms() {
+  iniziaProxy();
   const sel = $("wmsKnown");
   sel.replaceChildren(h("option", { value: "" }, "— scegli un servizio —"), ...SERVIZI_NOTI.map((s) => h("option", { value: s.url }, s.nome)));
   sel.addEventListener("change", () => {
@@ -1021,7 +1122,7 @@ function avvia() {
     $("btnLegalOk").addEventListener("click", () => { mem.set("am.legale", true); legale.close(); }, { once: true });
   }
 
-  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  if ("serviceWorker" in navigator && location.protocol !== "file:" && !ambiente().nativa) { // nell'app Android i file sono già dentro il pacchetto
     const aveva = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register("./sw.js").catch(() => {});
     navigator.serviceWorker.addEventListener("controllerchange", () => { if (aveva) toast("App aggiornata. Riaprila per usare l'ultima versione.", 6000); });

@@ -164,6 +164,20 @@ export class ErroreRete extends Error {
   }
 }
 
+/**
+ * Dentro l'app Android (Capacitor) le richieste possono passare dal client HTTP nativo, che non
+ * è soggetto al blocco CORS e può leggere anche i servizi http. Altrove restituisce null.
+ */
+export function fetchNativo(win = globalThis) {
+  const http = win.Capacitor?.isNativePlatform?.() ? win.Capacitor.Plugins?.CapacitorHttp : null;
+  if (!http?.get) return null;
+  return async (url) => {
+    const r = await http.get({ url, responseType: "text" });
+    const testo = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => testo, json: async () => JSON.parse(testo) };
+  };
+}
+
 export async function prendi(url, { metodo = "GET", corpo, intestazioni, timeoutMs = 30000, tipo = "json", impl = globalThis.fetch } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);

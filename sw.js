@@ -1,7 +1,7 @@
 // Service worker: guscio dell'app in cache (funziona senza rete), tessere delle mappe
 // viste di recente, aggiornamento in sottofondo. Le chiamate alle API non vengono toccate.
 
-const VERSIONE = "am-v3";
+const VERSIONE = "am-v4";
 const CACHE_GUSCIO = `${VERSIONE}-guscio`;
 const CACHE_TESSERE = `${VERSIONE}-tessere`;
 const MAX_TESSERE = 500;

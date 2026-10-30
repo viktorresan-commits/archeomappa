@@ -2,7 +2,7 @@
 // Europeana e lettura dei GetCapabilities WMS. Le funzioni "parse*" sono pure e testabili.
 
 import { classifica, dominante, epocaDaAnno } from "./epochs.js";
-import { prendi, soloTesto, tronca, urlSicuro, cacheLeggi, cacheScrivi } from "./util.js";
+import { prendi, soloTesto, tronca, urlSicuro, cacheLeggi, cacheScrivi, fetchNativo } from "./util.js";
 import { haversine } from "./geo.js";
 
 // ------------------------------------------------------------- categorie OSM
@@ -379,7 +379,7 @@ export function urlCapabilities(base, versione = "1.3.0") {
 }
 
 export async function caricaCapabilities(base, { impl, versione } = {}) {
-  const xml = await prendi(urlCapabilities(base, versione), { tipo: "testo", impl, timeoutMs: 25000 });
+  const xml = await prendi(urlCapabilities(base, versione), { tipo: "testo", impl: impl ?? fetchNativo() ?? undefined, timeoutMs: 25000 });
   const cap = leggiCapabilities(xml);
   if (!cap.livelli.length) throw new Error("Il servizio ha risposto ma non elenca livelli leggibili.");
   return cap;

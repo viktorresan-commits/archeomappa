@@ -65,6 +65,19 @@
             <span id="probeMsg" class="hint"></span>
           </div>
 
+          <details class="box" id="boxProxy">
+            <summary>Servizi del Ministero (LiDAR, ortofoto): proxy</summary>
+            <p class="hint">I servizi del Geoportale nazionale sono pensati per http e una pagina https come questa non può caricarli. Nell'app Android funzionano senza fare nulla. Dal sito serve un proxy https: se ne può creare uno gratuito (istruzioni nel README, file <code>tools/proxy-pcn-worker.js</code>) e incollare qui il suo indirizzo.</p>
+            <label class="field">Indirizzo del proxy
+              <input id="proxyPcn" type="url" inputmode="url" placeholder="https://nome.account.workers.dev" autocomplete="off">
+            </label>
+            <div class="row">
+              <button id="btnProxy" type="button" class="btn">Salva</button>
+              <button id="btnProxyNo" type="button" class="btn">Togli il proxy</button>
+            </div>
+            <p id="proxyMsg" class="hint" role="status"></p>
+          </details>
+
           <details class="box">
             <summary>Aggiungi un servizio WMS</summary>
             <label class="field">Servizi noti

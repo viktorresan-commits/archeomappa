@@ -8,7 +8,7 @@ Non ha account, pagamenti, pubblicità né tracciamento. Tutto resta nel disposi
 
 ### Fase 1: mappa, siti noti, zone, fonti
 
-- **Livelli**: OpenStreetMap, OpenTopoMap, satellite Esri; rilievo ombreggiato; servizi WMS istituzionali (catasto, ortofoto, IGM, LiDAR PST-A per regione) e qualsiasi altro WMS aggiunto a mano leggendo il suo GetCapabilities. «Verifica servizi» prova davvero ogni servizio e mostra se risponde.
+- **Livelli**: OpenStreetMap, OpenTopoMap, satellite Esri; rilievo ombreggiato; servizi WMS istituzionali (catasto, ortofoto, IGM, LiDAR del Geoportale nazionale per Marche e Umbria) e qualsiasi altro WMS aggiunto a mano leggendo il suo GetCapabilities. «Verifica servizi» prova ogni servizio di cui conosce il livello e dice «non verificabile» per gli altri, senza dichiararli fermi.
 - **Dintorni**: castelli, rovine, strutture storiche e luoghi di culto già censiti in OpenStreetMap entro un raggio da 1 a 30 km dal centro; filtro per epoca stimata; esportazione GeoJSON e CSV.
 - **Zone**: triangolazione di Delaunay dei siti noti e punteggio dei triangoli (siti vicini, distanza media, regolarità, densità). Scarta le aree vicine a siti già noti o sotto soglia: nel dubbio non propone nulla. Mostra le prime 3 zone ed esporta GeoJSON.
 - **Fonti**: Wikipedia, Wikimedia Commons, Internet Archive ed Europeana (con chiave) su un luogo o attorno al centro, con profilo per epoca.
@@ -51,13 +51,25 @@ I percorsi sono tutti relativi, quindi funziona anche in una sottocartella.
 - **iPhone/iPad (Safari)**: Condividi, «Aggiungi alla schermata Home».
 - **Computer (Chrome/Edge)**: icona di installazione nella barra dell'indirizzo.
 
-## APK
+## App Android (APK)
 
-Un APK si ricava dall'app già pubblicata: vai su pwabuilder.com, inserisci l'indirizzo https e scegli «Android». Per un pacchetto Capacitor/Bubblewrap serve Android SDK, che qui non era disponibile. L'APK aperto da file non richiede il Play Store; per il Play Store serve un account sviluppatore.
+Il progetto contiene il necessario per costruire un APK con Capacitor (cartella `apk/`), e un flusso di lavoro GitHub (`.github/workflows/apk.yml`) che lo costruisce da solo a ogni modifica dell'app, oppure a mano da Actions → «APK Android» → Run workflow. L'APK compare nella pagina **Releases** del repository, nella versione «apk-ultimo», con indirizzo fisso:
+
+`https://github.com/TUO-NOME/NOME-REPO/releases/download/apk-ultimo/ArcheoMappa-Italia.apk`
+
+Per installarlo il telefono chiede di consentire l'installazione da quella fonte. L'APK è firmato con una chiave di sviluppo (`apk/debug.keystore`, pubblica e uguale a ogni costruzione, così gli aggiornamenti si installano sopra la versione precedente): va bene per provare e per distribuire all'interno dell'ente, non per il Play Store.
+
+**Perché serve l'APK per il LiDAR del Ministero.** I servizi del Geoportale nazionale (LiDAR, ortofoto) sono pensati per `http`. Una pagina `https` come il sito su GitHub Pages non può caricarli: il browser trasforma le immagini `http` in `https` (provato in Chromium) e, se il servizio non risponde in `https`, non si vede nulla. L'app Android è impostata come altre app Capacitor che li usano: si apre su `http://localhost` e consente il traffico `http` (`apk/capacitor.config.json`), quindi i servizi si caricano. Nell'app anche la lettura dei GetCapabilities passa dal client nativo, che non ha il blocco CORS.
+
+**Dal sito (https)**: serve un proxy. In `tools/proxy-pcn-worker.js` c'è un programma di poche righe da incollare in un Cloudflare Worker gratuito (le istruzioni sono nel file); poi si incolla l'indirizzo in Livelli → «Servizi del Ministero: proxy». Passano solo le mappe WMS del Geoportale. In alternativa si carica un file LiDAR nella scheda Rilievo.
+
+Costruzione in locale (serve Node 22, JDK 21 e Android SDK): `cd apk && npm install && node prepara-www.mjs && npx cap add android && node applica-android.mjs && npx cap sync android && cd android && ./gradlew assembleDebug`.
+
+Per il solo involucro senza GitHub resta valida anche la strada pwabuilder.com, ma darebbe un'app su https e quindi senza il LiDAR del Ministero.
 
 ## Aggiornare
 
-Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v3`, poi `am-v4`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.2.1) e, se aggiungi file, la lista `GUSCIO` di `sw.js`.
+Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v4`, poi `am-v5`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.2.2) e, se aggiungi file, la lista `GUSCIO` di `sw.js`.
 
 ## Provare la logica
 
@@ -72,7 +84,8 @@ Nessuna dipendenza npm (Node 18 o più recente). Le prove sul rilievo creano da 
 - `tests/test-raster.mjs`: lettore GeoTIFF/ASCII confrontato valore per valore con un riferimento;
 - `tests/test-visual.mjs`: proiezioni, ombreggiatura, rilievo locale, cielo visibile, colori;
 - `tests/test-detect.mjs`: forme, regole di classificazione, rilevatore sul terreno finto a 2 e 10 m, filtri, GeoJSON;
-- `tests/test-analisi.mjs`: sessione di analisi, cache, motore con e senza worker, arresto del worker.
+- `tests/test-analisi.mjs`: sessione di analisi, cache, motore con e senza worker, arresto del worker;
+- `tests/test-layers.mjs`: livelli del Ministero (nomi dei livelli, http/https secondo l'ambiente, proxy), client nativo dell'app Android e programma del proxy.
 
 Per rigenerare le icone: `python3 tools/make_icons.py` (richiede Pillow).
 
@@ -85,7 +98,7 @@ js/geo.js                    distanze, proiezione, Delaunay
 js/potential.js              punteggio e selezione delle zone
 js/epochs.js                 epoche stimate dalle parole del testo
 js/sources.js                OpenStreetMap, Wikipedia, Commons, Archive, Europeana, WMS
-js/layers.js                 registro dei livelli e prova dei servizi
+js/layers.js                 registro dei livelli, http/https, proxy, prova dei servizi
 js/util.js                   DOM sicuro, CSV, cache, rete
 js/rilievo-ui.js             scheda «Rilievo»: file, visualizzazioni, risultati, export
 js/motore.js                 Web Worker con ripiego sul thread principale
@@ -96,6 +109,9 @@ js/proj.js                   UTM, Web Mercator, gradi
 js/visual.js                 ombre, rilievo locale, cielo visibile, colori
 js/detect.js                 rilevatore di anomalie e regole
 tools/make_test_dem.py       terreno finto per le prove
+tools/proxy-pcn-worker.js    proxy gratuito (Cloudflare Worker) per i servizi del Ministero
+apk/                         pacchetto Android (Capacitor): configurazione e script
+.github/workflows/apk.yml    costruisce l'APK e lo pubblica nelle Releases
 sw.js, manifest.json, icons/ installazione e uso offline
 tests/                       prove della logica e dei dati finti
 ```
@@ -107,8 +123,8 @@ La mappa usa Leaflet 1.9.4 caricato da unpkg; il service worker lo conserva in c
 - **Dati**: i siti noti vengono da OpenStreetMap, che è volontario e incompleto. Non sostituisce il Catalogo Generale dei Beni Culturali né i vincoli ufficiali.
 - **Epoche**: stimate dalle parole del testo (nome, descrizione, tag). Sono un indizio, non una datazione.
 - **Soglie delle zone**: i valori predefiniti (0,25 e 0,55, distanza minima 700 m) sono un punto di partenza. Con dati molto densi quasi tutto risulta «alto»: vanno tarati con l'ufficio su aree già studiate.
-- **LiDAR dai servizi WMS del Ministero**: il livello «LiDAR PST-A» non ha risposto da un telefono vero (come gli altri servizi del Geoportale Nazionale). Gli indirizzi pubblicati dal Ministero risultano `http`, che una pagina `https` non può usare, e il nome dei livelli non si può leggere dal browser (CORS). Non sono riuscito a contattare quei servizi dall'ambiente di sviluppo, quindi non so dire se siano spenti o solo non utilizzabili dal browser. Il LiDAR si usa in modo affidabile caricando un file nella scheda Rilievo (guida «Dove trovo un file LiDAR?»).
-- **Servizi WMS istituzionali**: gli indirizzi sono quelli pubblicati dai rispettivi enti al momento della scrittura, ma non ho potuto contattarli. Il nome del livello viene letto dal servizio e potrebbe non essere leggibile dal browser (CORS). In quel caso si inserisce a mano. I servizi `http` (come SITAP) non funzionano su una pagina https.
+- **LiDAR dai servizi WMS del Ministero**: i nomi dei file e dei livelli di Marche e Umbria vengono da un'app Android che li usa davvero (Marche: DTM 1 m e 2 m, DSM primo e ultimo impulso; Umbria: DTM 1 m, anche del volo 2014, DSM 2014). Per le altre regioni il nome del livello va letto dal servizio, e dal sito non è possibile (CORS): sono segnate «da verificare». Non ho potuto contattare i servizi del Ministero dall'ambiente di sviluppo, quindi **non so se rispondano anche in https**: dal sito, senza proxy, il LiDAR potrebbe non vedersi (l'app lo dice in un messaggio). Nell'app Android si usa `http`, come l'app di riferimento.
+- **Altri servizi WMS istituzionali**: ortofoto 2012 ha il livello noto (stessa fonte); IGM e catasto no, e il nome si legge dal servizio, quando il browser lo consente. I servizi `http` (come SITAP) funzionano solo nell'app Android.
 - **Rilevatore non tarato su dati reali**: è stato provato solo su un terreno finto. Le soglie predefinite sono un punto di partenza ragionevole, non un risultato di taratura: su LiDAR vero vanno verificate e regolate confrontando con strutture note. Boschi, cave, argini, muri a secco, campi lavorati e rilievi naturali possono dare falsi positivi; strutture molto degradate o più piccole del pixel sfuggono. Il rilevatore dà ipotesi da verificare con ortofoto, fonti e sopralluogo autorizzato, non scoperte.
 - **Pixel da 10 m (TINITALY)**: si vedono solo forme grandi, e sul terreno finto il risultato cambiava con il raggio di analisi (la soglia automatica dipende dall'area). Per tumuli, fossati e piccoli forti servono dati a 1–2 m.
 - **Memoria e tempi**: l'area analizzata è un quadrato di lato fino a 6 km; oltre 6 milioni di pixel la risoluzione viene ridotta (e lo dice). Su telefoni con poca memoria un file ASCII molto grande può non aprirsi: meglio un GeoTIFF ritagliato.
@@ -119,7 +135,9 @@ La mappa usa Leaflet 1.9.4 caricato da unpkg; il service worker lo conserva in c
 
 Le prove della logica passano. L'interfaccia è stata provata in Chromium headless con una libreria cartografica sostitutiva e servizi simulati: schede, ricerca, filtri, zone, fonti, esportazioni, modalità pubblica, protezione dall'iniezione di HTML, cache e riapertura senza rete. Per il rilievo, sempre in Chromium: caricamento di un GeoTIFF e di un ASCII, lettura nel Web Worker e ripiego senza worker, sei visualizzazioni, ricerca delle anomalie, filtro edifici, esportazioni, file non valido, impostazioni salvate.
 
-Non è stata provata su telefoni veri, con Leaflet reale, con i servizi WMS istituzionali reali né **con un file LiDAR italiano vero**: nessun dato reale era raggiungibile durante lo sviluppo. Va fatta una prova sul campo prima di consegnarla.
+Il livello del Ministero è stato provato in Chromium con Leaflet vero e risposte simulate in tre casi: app Android simulata (richieste `http`, immagini caricate), sito `https` senza proxy (richieste `https` e messaggio chiaro se il servizio non risponde) e sito con proxy. Il programma del proxy è provato con un servizio simulato.
+
+Non è stata provata su telefoni veri, con i servizi del Ministero reali, **con la costruzione dell'APK su GitHub (non eseguibile dall'ambiente di sviluppo)**, con un proxy messo davvero online né **con un file LiDAR italiano vero**: nessun dato reale era raggiungibile. Va fatta una prova sul campo prima di consegnarla.
 
 ## Note legali
 

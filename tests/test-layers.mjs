@@ -1,0 +1,168 @@
+// Livelli del Ministero, adattamento http/https, proxy e client nativo. Esegui con: node tests/test-layers.mjs
+import assert from "node:assert/strict";
+import {
+  SOVRAPPOSIZIONI, WMS_PCN, PCN_HOST, ambiente, normalizzaProxy, urlPerAmbiente, usaPcn, urlRegione, prodottiRegione, urlProva, creaLivello,
+} from "../js/layers.js";
+import { fetchNativo } from "../js/util.js";
+import { caricaCapabilities } from "../js/sources.js";
+import worker, { richiestaAmmessa } from "../tools/proxy-pcn-worker.js";
+
+let ok = 0;
+const pendenti = [];
+const segna = (n) => { ok++; console.log("  ok  ", n); };
+const fallisce = (n, e) => { console.error("  FAIL", n, "\n      ", e.message); process.exitCode = 1; };
+const test = (nome, fn) => {
+  try {
+    const r = fn();
+    if (r && typeof r.then === "function") pendenti.push(r.then(() => segna(nome), (e) => fallisce(nome, e)));
+    else segna(nome);
+  } catch (e) {
+    fallisce(nome, e);
+  }
+};
+
+const lidar = SOVRAPPOSIZIONI.find((s) => s.id === "lidar");
+
+console.log("ambiente");
+test("pagina https: l'http non è consentito", () => {
+  assert.deepEqual(ambiente({ location: { protocol: "https:" } }), { nativa: false, httpConsentito: false });
+});
+test("app Android (Capacitor su http://localhost): http consentito", () => {
+  const amb = ambiente({ location: { protocol: "http:" }, Capacitor: { isNativePlatform: () => true } });
+  assert.deepEqual(amb, { nativa: true, httpConsentito: true });
+});
+test("senza finestra (Node) si comporta come https", () => {
+  assert.equal(ambiente({}).httpConsentito, false);
+});
+
+console.log("indirizzi del Ministero");
+const marche = WMS_PCN + "servizi-LiDAR/LIDAR_MARCHE.map";
+test("su https resta https", () => {
+  assert.equal(urlPerAmbiente(marche, { amb: { httpConsentito: false } }), marche);
+});
+test("dove l'http è consentito diventa http, con ?map= intatto", () => {
+  const u = urlPerAmbiente(marche, { amb: { httpConsentito: true } });
+  assert.equal(u, `http://${PCN_HOST}/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map`);
+});
+test("con il proxy passa dal proxy, qualunque sia l'ambiente", () => {
+  for (const httpConsentito of [true, false]) {
+    assert.equal(urlPerAmbiente(marche, { amb: { httpConsentito }, proxy: " https://p.example.workers.dev/ " }),
+      "https://p.example.workers.dev/pcn/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map");
+  }
+});
+test("un proxy non https viene ignorato", () => {
+  assert.equal(normalizzaProxy("http://p.example"), "");
+  assert.equal(urlPerAmbiente(marche, { amb: { httpConsentito: false }, proxy: "http://p.example" }), marche);
+});
+test("gli altri servizi non vengono toccati", () => {
+  const u = "https://wms.cartografia.agenziaentrate.gov.it/inspire/wms/ows01.php";
+  assert.equal(urlPerAmbiente(u, { amb: { httpConsentito: true }, proxy: "https://p.example" }), u);
+  assert.equal(urlPerAmbiente(undefined), undefined);
+  assert.equal(usaPcn("non è un indirizzo"), false);
+});
+
+console.log("LiDAR: regioni e livelli");
+test("Marche e Umbria hanno i livelli presi dall'app che li usa", () => {
+  assert.deepEqual(prodottiRegione(lidar, "MARCHE").map((p) => p.livello), [
+    "EL.LIDAR.MARCHE.1x1.DTM", "EL.LIDAR.MARCHE.1x1.DSM_LAST", "EL.LIDAR.MARCHE.1x1.DSM_FIRST", "EL.LIDAR.MARCHE.2x2.DTM",
+  ]);
+  assert.deepEqual(prodottiRegione(lidar, "UMBRIA").map((p) => p.livello), [
+    "EL.LIDAR.UMBRIA.1x1.DTM", "EL.LIDAR.UMBRIA.1x1.T1.DTM", "EL.LIDAR.UMBRIA.1x1.T1.DSM_FIRST",
+  ]);
+  assert.deepEqual(prodottiRegione(lidar, "LAZIO"), []);
+});
+test("il file dell'Umbria è LIDAR_UMBRIA_2.map, gli altri seguono il modello", () => {
+  assert.ok(urlRegione(lidar, "UMBRIA").endsWith("servizi-LiDAR/LIDAR_UMBRIA_2.map"));
+  assert.ok(urlRegione(lidar, "MARCHE").endsWith("servizi-LiDAR/LIDAR_MARCHE.map"));
+  assert.ok(urlRegione(lidar, "LAZIO").endsWith("servizi-LiDAR/LIDAR_LAZIO.map"));
+});
+test("ogni regione elencata ha un indirizzo valido; nessun duplicato", () => {
+  assert.equal(new Set(lidar.regioni).size, lidar.regioni.length);
+  for (const r of lidar.regioni) assert.doesNotThrow(() => new URL(urlRegione(lidar, r)));
+});
+test("il GetMap di prova usa SRS=EPSG:3857 con WMS 1.1.1 e il raggio richiesto", () => {
+  const u = new URL(urlProva(urlRegione(lidar, "MARCHE"), "EL.LIDAR.MARCHE.1x1.DTM", "1.1.1", 250));
+  assert.equal(u.searchParams.get("map"), "/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map");
+  assert.equal(u.searchParams.get("SRS"), "EPSG:3857");
+  assert.equal(u.searchParams.get("CRS"), null);
+  const [x0, y0, x1, y1] = u.searchParams.get("BBOX").split(",").map(Number);
+  assert.ok(Math.abs(x1 - x0 - 500) < 1e-6 && Math.abs(y1 - y0 - 500) < 1e-6);
+});
+test("creaLivello costruisce un WMS 1.1.1 con livello e zoom nativo", () => {
+  let visto;
+  const L = { tileLayer: { wms: (url, o) => { visto = { url, o }; return {}; } } };
+  creaLivello(L, lidar, { url: urlPerAmbiente(urlRegione(lidar, "MARCHE"), { amb: { httpConsentito: true } }), livelli: "EL.LIDAR.MARCHE.1x1.DTM" });
+  assert.equal(visto.o.version, "1.1.1");
+  assert.equal(visto.o.layers, "EL.LIDAR.MARCHE.1x1.DTM");
+  assert.equal(visto.o.maxNativeZoom, 17);
+  assert.ok(visto.url.startsWith("http://wms.pcn.minambiente.it/ogc?map="));
+});
+test("l'ortofoto ha il livello noto: non serve leggere il servizio", () => {
+  const o = SOVRAPPOSIZIONI.find((s) => s.id === "ortofoto");
+  assert.equal(o.livelli, "OI.ORTOIMMAGINI.2012.33");
+  assert.equal(o.versione, "1.1.1");
+});
+
+console.log("client nativo (app Android)");
+test("fuori dall'app non c'è client nativo", () => {
+  assert.equal(fetchNativo({}), null);
+  assert.equal(fetchNativo({ Capacitor: { isNativePlatform: () => false } }), null);
+});
+test("nell'app il GetCapabilities passa dal client nativo", async () => {
+  const chiamate = [];
+  const win = {
+    Capacitor: {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { get: async (o) => { chiamate.push(o); return { status: 200, data: "<WMS_Capabilities><Capability><Layer><Name>x.y</Name><Title>X</Title></Layer></Capability></WMS_Capabilities>" }; } } },
+    },
+  };
+  const f = fetchNativo(win);
+  const cap = await caricaCapabilities("http://wms.example/ogc?map=/a.map", { impl: f });
+  assert.deepEqual(cap.livelli, [{ name: "x.y", title: "X" }]);
+  assert.equal(chiamate[0].responseType, "text");
+  assert.ok(chiamate[0].url.includes("GetCapabilities") && chiamate[0].url.includes("map="));
+});
+test("il client nativo segnala gli errori HTTP", async () => {
+  const f = fetchNativo({ Capacitor: { isNativePlatform: () => true, Plugins: { CapacitorHttp: { get: async () => ({ status: 503, data: "" }) } } } });
+  await assert.rejects(caricaCapabilities("http://wms.example/ogc", { impl: f }), /503/);
+});
+
+console.log("proxy (tools/proxy-pcn-worker.js)");
+const richiesta = (url, metodo = "GET") => new Request(url, { method: metodo });
+const MAPPA = "https://p.example.workers.dev/pcn/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WMS&REQUEST=GetMap&LAYERS=EL.LIDAR.MARCHE.1x1.DTM";
+test("ammette solo le mappe WMS del Geoportale", () => {
+  assert.equal(richiestaAmmessa(new URL(MAPPA)), true);
+  assert.equal(richiestaAmmessa(new URL("https://p.example/pcn/ogc?map=/etc/passwd")), false);
+  assert.equal(richiestaAmmessa(new URL("https://p.example/pcn/ogc?map=/ms_ogc/WMS_v1.3/../../x.map")), false);
+  assert.equal(richiestaAmmessa(new URL("https://p.example/pcn/ogc")), false);
+  assert.equal(richiestaAmmessa(new URL("https://p.example/altro?map=/ms_ogc/WMS_v1.3/a.map")), false);
+});
+test("inoltra la richiesta al Ministero e aggiunge CORS", async () => {
+  let inoltrato;
+  const r = await worker.fetch(richiesta(MAPPA), {}, {}, async (u, o) => { inoltrato = { u, o }; return new Response("PNG", { status: 200, headers: { "content-type": "image/png" } }); });
+  assert.equal(inoltrato.u, "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WMS&REQUEST=GetMap&LAYERS=EL.LIDAR.MARCHE.1x1.DTM");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("access-control-allow-origin"), "*");
+  assert.equal(r.headers.get("content-type"), "image/png");
+  assert.equal(await r.text(), "PNG");
+});
+test("rifiuta richieste non ammesse senza chiamare il Ministero", async () => {
+  let chiamato = false;
+  const f = async () => { chiamato = true; return new Response("x"); };
+  assert.equal((await worker.fetch(richiesta("https://p.example/pcn/ogc?map=/etc/passwd"), {}, {}, f)).status, 404);
+  assert.equal((await worker.fetch(richiesta(MAPPA, "POST"), {}, {}, f)).status, 405);
+  assert.equal(chiamato, false);
+});
+test("risponde alla verifica preliminare del browser (OPTIONS)", async () => {
+  const r = await worker.fetch(richiesta(MAPPA, "OPTIONS"), {});
+  assert.equal(r.status, 204);
+  assert.equal(r.headers.get("access-control-allow-origin"), "*");
+});
+test("se il Ministero non risponde restituisce 502 con CORS", async () => {
+  const r = await worker.fetch(richiesta(MAPPA), {}, {}, async () => { throw new Error("rete"); });
+  assert.equal(r.status, 502);
+  assert.equal(r.headers.get("access-control-allow-origin"), "*");
+});
+
+await Promise.all(pendenti);
+console.log(`\n${ok} controlli eseguiti${process.exitCode ? ", CON ERRORI" : ", tutti superati"}.`);

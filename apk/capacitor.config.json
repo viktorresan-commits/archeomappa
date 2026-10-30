@@ -1,0 +1,17 @@
+{
+  "appId": "it.archeomappa.app",
+  "appName": "ArcheoMappa Italia",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  },
+  "android": {
+    "adjustMarginsForEdgeToEdge": "force"
+  }
+}

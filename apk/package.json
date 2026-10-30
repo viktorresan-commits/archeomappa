@@ -1,0 +1,15 @@
+{
+  "name": "archeomappa-apk",
+  "version": "0.2.2",
+  "private": true,
+  "description": "Pacchetto Android (Capacitor) di ArcheoMappa Italia. Si costruisce con il flusso di lavoro .github/workflows/apk.yml.",
+  "scripts": {
+    "prepara": "node prepara-www.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.0",
+    "@capacitor/cli": "^7.4.0",
+    "@capacitor/core": "^7.4.0",
+    "leaflet": "1.9.4"
+  }
+}
