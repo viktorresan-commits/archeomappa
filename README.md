@@ -57,7 +57,7 @@ Il progetto contiene il necessario per costruire un APK con Capacitor (cartella 
 
 `https://github.com/TUO-NOME/NOME-REPO/releases/download/apk-ultimo/ArcheoMappa-Italia.apk`
 
-Per installarlo il telefono chiede di consentire l'installazione da quella fonte. L'APK è firmato con una chiave di sviluppo (`apk/debug.keystore`, pubblica e uguale a ogni costruzione, così gli aggiornamenti si installano sopra la versione precedente): va bene per provare e per distribuire all'interno dell'ente, non per il Play Store.
+Per installarlo il telefono chiede di consentire l'installazione da quella fonte. L'APK è firmato con una chiave di sviluppo (`apk/debug.keystore`, pubblica, la stessa a ogni costruzione, e il flusso di lavoro controlla che sia davvero quella: così gli aggiornamenti si installano sopra la versione precedente): va bene per provare e per distribuire all'interno dell'ente, non per il Play Store.
 
 **Perché serve l'APK per il LiDAR del Ministero.** I servizi del Geoportale nazionale (LiDAR, ortofoto) sono pensati per `http`. Una pagina `https` come il sito su GitHub Pages non può caricarli: il browser trasforma le immagini `http` in `https` (provato in Chromium) e, se il servizio non risponde in `https`, non si vede nulla. L'app Android è impostata come altre app Capacitor che li usano: si apre su `http://localhost` e consente il traffico `http` (`apk/capacitor.config.json`), quindi i servizi si caricano. Nell'app anche la lettura dei GetCapabilities passa dal client nativo, che non ha il blocco CORS.
 

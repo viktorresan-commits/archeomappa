@@ -57,11 +57,6 @@ jobs:
           BUILD_NUMBER=${{ github.run_number }} node applica-android.mjs
           npx cap sync android
 
-      - name: Chiave di firma (di prova, uguale a ogni costruzione)
-        run: |
-          mkdir -p ~/.android
-          cp apk/debug.keystore ~/.android/debug.keystore
-
       - name: Costruisci l'APK
         working-directory: apk/android
         run: |
@@ -70,6 +65,11 @@ jobs:
 
       - name: Dai all'APK un nome chiaro
         run: cp apk/android/app/build/outputs/apk/debug/app-debug.apk ArcheoMappa-Italia.apk
+
+      - name: Controlla che sia firmato con la chiave del progetto
+        run: |
+          keytool -printcert -jarfile ArcheoMappa-Italia.apk | tee firma.txt
+          grep -q "CN=ArcheoMappa Debug" firma.txt
 
       - uses: actions/upload-artifact@v4
         with:

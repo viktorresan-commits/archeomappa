@@ -1,7 +1,7 @@
 // Ritocca il progetto Android generato da «npx cap add android»:
 //  - permessi di posizione (per il pulsante «Vai alla mia posizione»);
 //  - traffico http consentito (i servizi del Ministero rispondono in http);
-//  - icona dell'app e numero di versione.
+//  - icona dell'app, numero di versione e chiave di firma.
 // Uso: node applica-android.mjs        Variabili: BUILD_NUMBER (numero di versione), ANDROID_DIR.
 import { readFile, writeFile, cp } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
@@ -42,6 +42,24 @@ let gradle = await readFile(gradlePath, "utf8");
 const versione = JSON.parse(await readFile(path.join(qui, "package.json"), "utf8")).version;
 const numero = Number(process.env.BUILD_NUMBER ?? 1) || 1;
 gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${numero}`).replace(/versionName\s+"[^"]*"/, `versionName "${versione}"`);
+// Firma: usa sempre la chiave di apk/debug.keystore (così ogni versione si installa sopra la precedente).
+// Senza questa riga il sistema di costruzione ne crea una nuova a ogni volta.
+if (!/signingConfigs\s*\{/.test(gradle)) {
+  if (!/\n(\s*)buildTypes\s*\{/.test(gradle)) throw new Error("In build.gradle non trovo buildTypes: aggiorna applica-android.mjs");
+  gradle = gradle.replace(/\n(\s*)buildTypes\s*\{/, (_, rientro) => `
+${rientro}signingConfigs {
+${rientro}    archeomappa {
+${rientro}        storeFile file("../../debug.keystore")
+${rientro}        storePassword "android"
+${rientro}        keyAlias "androiddebugkey"
+${rientro}        keyPassword "android"
+${rientro}    }
+${rientro}}
+${rientro}buildTypes {
+${rientro}    debug {
+${rientro}        signingConfig signingConfigs.archeomappa
+${rientro}    }`);
+}
 await writeFile(gradlePath, gradle);
 
-console.log(`Android pronto: versione ${versione} (${numero}), permessi di posizione, http consentito, icona.`);
+console.log(`Android pronto: versione ${versione} (${numero}), permessi di posizione, http consentito, icona, chiave di firma.`);
