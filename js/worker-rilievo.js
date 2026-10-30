@@ -13,6 +13,9 @@ self.onmessage = async (ev) => {
     } else if (op === "analizza") {
       const r = await sessione.analizza(dati, (testo) => self.postMessage({ id, avanzamento: testo }));
       self.postMessage({ id, ok: true, risultato: r }, r.immagine ? [r.immagine.rgba.buffer] : []);
+    } else if (op === "confronta") {
+      const r = await sessione.confronta(dati, (testo) => self.postMessage({ id, avanzamento: testo }));
+      self.postMessage({ id, ok: true, risultato: r });
     } else if (op === "chiudi") {
       sessione.chiudi();
       self.postMessage({ id, ok: true, risultato: null });

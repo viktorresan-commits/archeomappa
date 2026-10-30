@@ -60,17 +60,43 @@ export function aggiungiRipiegoNativo(layer, { win = globalThis, stato = {} } = 
   return true;
 }
 
+/** Vero se tutti i pixel sono (quasi) trasparenti: il servizio ha risposto ma non ha disegnato nulla. */
+export function tuttoTrasparente(rgba) {
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i] > 8) return false;
+  return true;
+}
+
+/** Decodifica l'immagine (data URL) e dice se è del tutto trasparente. Se non si può leggere, risponde false. */
+export async function immagineVuota(src, win = globalThis) {
+  try {
+    const img = new win.Image();
+    await new Promise((ok, ko) => { img.onload = ok; img.onerror = ko; img.src = src; });
+    const w = Math.min(512, img.naturalWidth || 256), h = Math.min(512, img.naturalHeight || 256);
+    const cv = win.document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(img, 0, 0, w, h);
+    return tuttoTrasparente(cx.getImageData(0, 0, w, h).data);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Prova una tessera del livello (quella al centro della mappa) e racconta che cosa succede.
- * Restituisce {url, via, ok, dettaglio, miniatura?}.
+ * Restituisce {url, via, ok, dettaglio, miniatura?, vuota?}; «vuota» (solo nell'app) = immagine tutta trasparente.
  */
 export async function provaTessera({ url, win = globalThis }) {
   const http = clienteNativo(win);
   if (http?.get) {
     const e = await scaricaTessera(http, url);
-    return e.src
-      ? { url, via: "client nativo dell'app", ok: true, dettaglio: `immagine ${e.tipo}, ${Math.max(1, Math.round(e.byte / 1024))} KB`, miniatura: e.src }
-      : { url, via: "client nativo dell'app", ok: false, dettaglio: e.errore };
+    if (!e.src) return { url, via: "client nativo dell'app", ok: false, dettaglio: e.errore };
+    const vuota = await immagineVuota(e.src, win);
+    return {
+      url, via: "client nativo dell'app", ok: true, vuota,
+      dettaglio: `immagine ${e.tipo}, ${Math.max(1, Math.round(e.byte / 1024))} KB${vuota ? ", ma tutta trasparente: il servizio non ha disegnato nulla qui a questo ingrandimento" : ""}`,
+      miniatura: e.src,
+    };
   }
   return new Promise((risolvi) => {
     const img = new win.Image();

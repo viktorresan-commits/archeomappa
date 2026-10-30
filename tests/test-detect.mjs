@@ -52,6 +52,13 @@ test("misuraForma: anello quadrato → molti vuoti interni, solidità alta, allu
   assert.ok(f.rettangolarita > 0.9);
   assert.equal(f.positivi, 1);
 });
+test("misuraForma: il contorno è in pixel della griglia (non della finestra locale della forma)", () => {
+  const { pix, L } = forma(200, 200, (x, y) => (Math.hypot(x - 150, y - 120) <= 10 ? 1 : 0));
+  const f = misuraForma(pix, 200, L);
+  const xs = f.hull.map((p) => p[0]), ys = f.hull.map((p) => p[1]);
+  assert.ok(Math.min(...xs) >= 139 && Math.max(...xs) <= 162, `x ${Math.min(...xs)}–${Math.max(...xs)}`);
+  assert.ok(Math.min(...ys) >= 109 && Math.max(...ys) <= 132, `y ${Math.min(...ys)}–${Math.max(...ys)}`);
+});
 test("misuraForma: segmento lungo → allungamento alto, lunghezza ~100, larghezza ~3", () => {
   const { pix, L } = forma(140, 40, (x, y) => (x >= 20 && x < 120 && y >= 18 && y < 21 ? -1 : 0));
   const f = misuraForma(pix, 140, L);
@@ -119,6 +126,28 @@ const prepara = async () => {
 const posizione = (nome) => { const [x, y] = verita.strutture[nome]; return [x, y]; };
 const distUtm = (a, lat, lon, g) => { const [x, y] = g.proiezione.daLatLon(lat, lon); return Math.hypot(x - a[0], y - a[1]); };
 
+test("il contorno di ogni anomalia sta attorno al suo centro (non in un angolo dell'area)", async () => {
+  await prepara();
+  assert.ok(ris.anomalie.length >= 2);
+  for (const a of ris.anomalie) {
+    for (const [la, lo] of a.geom.coord) {
+      const d = distUtm(griglia.proiezione.daLatLon(a.lat, a.lon), la, lo, griglia);
+      assert.ok(d <= a.dimensioneM, `anomalia ${a.id} (${a.codice}): un vertice dista ${d.toFixed(0)} m dal centro, dimensione ${a.dimensioneM.toFixed(0)} m`);
+    }
+  }
+});
+test("GeoJSON con il confronto con la foto: esito, p e nota per ogni anomalia; senza confronto nessuna proprietà foto", () => {
+  const a = { id: 7, tipo: "Struttura circolare", codice: "circolare", punteggio: 0.8, polarita: "positiva", dimensioneM: 30, areaM2: 700, contrastoM: 0.4, sitoNotoM: null, tagliata: false, lat: 43.3, lon: 12.9, geom: { tipo: "poligono", coord: [[43.3, 12.9], [43.3, 12.901], [43.301, 12.9]] } };
+  const senza = anomalieInGeoJSON([a], {}, "m");
+  assert.ok(!Object.keys(senza.features[0].properties).some((k) => k.startsWith("foto_")));
+  const con = anomalieInGeoJSON([a], {}, "m", new Map([[7, { esito: "solo-lidar", p: 0.61, contrasto: 1.2, vegetazione: true, spostamentoPx: [1, -1], motivo: "Nessun segno." }]]));
+  const p = con.features[0].properties;
+  assert.equal(p.foto_esito, "solo-lidar");
+  assert.equal(p.foto_p, 0.61);
+  assert.equal(p.foto_vegetazione, true);
+  assert.equal(p.foto_spostamento_px, "1,-1");
+  assert.equal(p.foto_nota, "Nessun segno.");
+});
 test("trova il recinto entro 20 m dal centro vero", async () => {
   await prepara();
   const r = ris.anomalie.filter((a) => a.codice === "recinto").map((a) => ({ a, d: distUtm(posizione("recinto"), a.lat, a.lon, griglia) })).sort((p, q) => p.d - q.d)[0];

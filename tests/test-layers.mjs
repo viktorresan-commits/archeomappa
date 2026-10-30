@@ -97,10 +97,10 @@ test("creaLivello costruisce un WMS 1.1.1 con livello e zoom nativo", () => {
   assert.equal(visto.o.maxNativeZoom, 17);
   assert.ok(visto.url.startsWith("http://wms.pcn.minambiente.it/ogc?map="));
 });
-test("l'ortofoto ha il livello noto: non serve leggere il servizio", () => {
+test("l'ortofoto ha la famiglia di livelli nota (uno per fuso): non serve leggere il servizio", () => {
   const o = SOVRAPPOSIZIONI.find((s) => s.id === "ortofoto");
-  assert.equal(o.livelli, "OI.ORTOIMMAGINI.2012.33");
-  assert.equal(o.versione, "1.1.1");
+  assert.equal(o.famiglia, "OI.ORTOIMMAGINI.2012");
+  assert.match(o.url, /raster\/ortofoto_colore_12\.map$/);
 });
 
 console.log("tessere nel formato dell'app che già funziona");
@@ -140,10 +140,19 @@ test("tesseraDa: il punto sta dentro la tessera trovata", () => {
     assert.ok(lat <= la(y) && lat >= la(y + 1) && lon >= lo(x) && lon <= lo(x + 1), `${lat},${lon} z${z}`);
   }
 });
-test("l'IGM chiede il livello da scegliere e la nota spiega gli errori del servizio", () => {
+test("la nota dell'IGM spiega che l'errore sugli indici è del server del Ministero", () => {
   const igm = SOVRAPPOSIZIONI.find((o) => o.id === "igm25");
-  assert.equal(igm.scegliLivello, true);
+  assert.equal(igm.famiglia, "CB.IGM25000");
   assert.match(igm.nota, /msShapefileOpen/);
+});
+test("creaLivello passa versione e dimensione della tessera al WMS", () => {
+  let visto = null;
+  const L = { tileLayer: { wms: (url, o) => { visto = { url, o }; return {}; } } };
+  creaLivello(L, SOVRAPPOSIZIONI.find((o) => o.id === "ortofoto"), { livelli: "OI.ORTOIMMAGINI.2012.33", versione: "1.3.0", tileSize: 512 });
+  assert.equal(visto.o.version, "1.3.0");
+  assert.equal(visto.o.tileSize, 512);
+  assert.equal(visto.o.minZoom, 9);
+  assert.equal(visto.o.layers, "OI.ORTOIMMAGINI.2012.33");
 });
 
 console.log("client nativo (app Android)");

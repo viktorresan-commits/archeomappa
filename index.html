@@ -33,7 +33,15 @@
         </button>
         <span id="netBadge" class="netbadge" hidden>Senza connessione</span>
       </header>
+      <div id="quick" class="quick" role="toolbar" aria-label="Livelli sulla mappa"></div>
       <div id="map" aria-label="Mappa"></div>
+      <div id="cmpBarra" class="cmpbarra" role="toolbar" aria-label="Confronto fra due livelli" hidden>
+        <span id="cmpEtichetta" class="cmpetichetta"></span>
+        <button id="btnCmpModo" type="button" class="chip">Lampeggio</button>
+        <button id="btnCmpPausa" type="button" class="chip" hidden>Pausa</button>
+        <button id="btnCmpScambia" type="button" class="chip" hidden>Scambia</button>
+        <button id="btnCmpFerma" type="button" class="chip">Ferma confronto</button>
+      </div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </div>
 
@@ -68,6 +76,22 @@
             <button id="btnDiag" type="button" class="btn">Perché non si vede?</button>
           </div>
           <div id="diagMsg" role="status" aria-live="polite"></div>
+
+          <details class="box" id="boxConfronta">
+            <summary>Confronta due livelli (cursore o lampeggio)</summary>
+            <p class="hint">Metti due livelli a confronto sulla stessa mappa: con il cursore a tendina trascini una linea e vedi A a sinistra e B a destra; con il lampeggio si alternano nello stesso punto. Utile per IGM contro satellite, LiDAR contro ortofoto, satellite di anni diversi. Durante il confronto gli altri livelli si spengono e tornano alla fine.</p>
+            <label class="field">Livello A (a sinistra)
+              <select id="cmpA"></select>
+            </label>
+            <label class="field">Livello B (a destra)
+              <select id="cmpB"></select>
+            </label>
+            <div class="row">
+              <button id="btnCmpTendina" type="button" class="btn primary">Cursore a tendina</button>
+              <button id="btnCmpLampeggio" type="button" class="btn">Lampeggio</button>
+            </div>
+            <p id="cmpMsg" class="hint" role="status"></p>
+          </details>
 
           <details class="box" id="boxProxy">
             <summary>Servizi del Ministero (LiDAR, ortofoto): proxy</summary>
@@ -217,6 +241,24 @@
           <p id="relStatus" class="status" role="status"></p>
 
           <div id="relLegend" class="legend"></div>
+          <div class="box" id="relConfrontoBox" hidden>
+            <div class="pt">Confronta con la foto</div>
+            <p class="hint">Per ogni anomalia controlla se nella foto si vede un segno nello stesso punto. «Solo nel LiDAR» significa che nella foto non si distingue nulla: non che non ci sia.</p>
+            <label class="field">Foto di riferimento
+              <select id="relRif"></select>
+            </label>
+            <div class="row"><button id="btnRelConfronta" type="button" class="btn primary">Confronta con la foto</button></div>
+            <p id="relConfrontoStato" class="status" role="status"></p>
+            <label class="field" id="relFiltroBox" hidden>Mostra
+              <select id="relFiltro">
+                <option value="tutte">Tutte le anomalie</option>
+                <option value="solo-lidar">Solo nel LiDAR</option>
+                <option value="anche-foto">Visibili anche nella foto</option>
+                <option value="incerto">Incerte</option>
+                <option value="non-valutabile">Non valutabili</option>
+              </select>
+            </label>
+          </div>
           <ul id="relList" class="results"></ul>
           <div class="row">
             <button id="btnRelGeo" type="button" class="btn" disabled>Scarica GeoJSON</button>
@@ -229,6 +271,12 @@
           <details class="box">
             <summary>Impostazioni del rilevatore</summary>
             <div id="relSettings"></div>
+          </details>
+          <details class="box">
+            <summary>Come funziona il confronto con la foto e quali limiti ha</summary>
+            <p>La foto (satellite o ortofoto) viene allineata al rilievo. Per ogni anomalia l'app misura quanto cambia la luminosità fra l'interno della forma e l'area attorno, e quanto sono marcati i contorni lungo il bordo. Poi mette la stessa forma in un centinaio di altri punti della stessa foto: se il punto vero si distingue dagli altri, nella foto c'è un segno; se è uno dei tanti, no. Si provano anche piccoli spostamenti (circa 2 m) perché foto e LiDAR non coincidono mai alla perfezione.</p>
+            <p><strong>Solo nel LiDAR</strong>: nella foto non si distingue nulla. <strong>Visibile anche nella foto</strong>: c'è un segno nello stesso punto (può essere una costruzione, una strada, un campo: va controllato). <strong>Incerto</strong>: forse una traccia. <strong>Non valutabile</strong>: la foto non copre il punto, è uniforme o è troppo grossolana per la forma.</p>
+            <p class="hint">Limiti: sotto un bosco o con una foto sfocata un segno può esistere e non vedersi, quindi «solo nel LiDAR» è un segnale e non una prova (l'app segnala quando la foto è coperta da vegetazione). Le soglie non sono ancora tarate su siti reali. Ogni foto ha la sua data: un segno presente in un anno può mancare in un altro, per questo conviene provarne più d'una. Dal sito il browser può non lasciar leggere i pixel delle foto: nell'app Android funziona.</p>
           </details>
           <details class="box">
             <summary>Come ragiona il rilevatore e quali limiti ha</summary>

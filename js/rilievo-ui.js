@@ -7,9 +7,12 @@ import { h, meta, mem, inCsv, scarica } from "./util.js";
 import { creaMotore } from "./motore.js";
 import { VISUALIZZAZIONI } from "./analisi.js";
 import { impostazioniPredefinite, anomalieInGeoJSON } from "./detect.js";
+import { ETICHETTE_ESITO, margineFotoM, zoomPerCella } from "./confronto.js";
+import { ELENCO_RIFERIMENTI, fonteRiferimento, scaricaMosaico, zoomUtilizzabile } from "./riferimenti.js";
+import { mercatoreDiretta } from "./proj.js";
 import { cercaSitiOSM, cercaEdificiStrade, CATEGORIE } from "./sources.js";
 import { formatDist, haversine } from "./geo.js";
-import { scaricaFinestra } from "./lidar-servizio.js";
+import { scaricaFinestra, scaricaImmagine } from "./lidar-servizio.js";
 
 const SISTEMI = [
   [32632, "UTM 32N WGS84 (EPSG:32632)"], [32633, "UTM 33N WGS84 (EPSG:32633)"], [32634, "UTM 34N WGS84 (EPSG:32634)"],
@@ -19,6 +22,14 @@ const SISTEMI = [
 
 const COLORI = { recinto: "#b5532a", circolare: "#7d3c98", lineare: "#1f6fb2" };
 const NOMI_CLASSE = { recinto: "Recinti", circolare: "Strutture circolari", lineare: "Tracciati lineari" };
+// Dopo il confronto con la foto: in evidenza ciò che si vede solo nel LiDAR, sbiadito ciò che si vede anche nella foto
+const STILE_ESITO = {
+  "solo-lidar": { opacity: 0.95, weight: 4, fillOpacity: 0.22 },
+  "anche-foto": { color: "#7a7a7a", opacity: 0.75, weight: 2, dashArray: "2 4", fillOpacity: 0.05 },
+  incerto: { opacity: 0.8, weight: 2.5, dashArray: "8 5", fillOpacity: 0.1 },
+  "non-valutabile": { color: "#9aa3a0", opacity: 0.5, weight: 1.5, dashArray: "1 5", fillOpacity: 0.02 },
+};
+const ORDINE_ESITI = ["solo-lidar", "anche-foto", "incerto", "non-valutabile"];
 
 // Ogni riga è una regola visibile e modificabile del rilevatore (vedi detect.js).
 const GRUPPI = [
@@ -62,9 +73,9 @@ function dentroCopertura(c, cop) {
 }
 
 export function iniziaRilievo(ctx) {
-  const { map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro, impostaCentro, fmtCoord, gen, pubblica, metaEsportazione, nomeFile, cerchio, sorgenteLidar, fonteLidar, cambiaFonteLidar } = ctx;
+  const { map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro, impostaCentro, fmtCoord, gen, pubblica, metaEsportazione, nomeFile, cerchio, sorgenteLidar, fonteLidar, cambiaFonteLidar, fonteWmsOrtofoto } = ctx;
   const motore = creaMotore();
-  const base = { raggioKm: 1, vis: "multi", esag: 2, opacita: 75, epsg: 32632, overrides: {} };
+  const base = { raggioKm: 1, vis: "multi", esag: 2, opacita: 75, epsg: 32632, rif: "sat", overrides: {} };
   const salvato = { ...base, ...mem.get("am.rilievo", {}) };
   salvato.overrides = { dettaglio: {}, grossolano: {}, ...salvato.overrides };
   const salva = () => mem.set("am.rilievo", salvato);
@@ -79,7 +90,8 @@ export function iniziaRilievo(ctx) {
   let info = null;
   let modo = "servizio"; // «servizio» (predefinito) oppure «file» (opzione avanzata)
   let scaricato = null; // ultima area scaricata dal servizio: {lat, lon, raggioM, base, livello}
-  let ultimi = null; // risultato dell'ultima ricerca di anomalie
+  let ultimi = null; // risultato dell'ultima ricerca di anomalie (e, se fatto, del confronto con la foto: ultimi.confronto)
+  let filtro = "tutte"; // filtro dell'elenco dopo il confronto
   let inCorso = false;
 
   // ---------------------------------------------------------------- impostazioni
@@ -177,6 +189,10 @@ export function iniziaRilievo(ctx) {
     $("relLegend").replaceChildren();
     $("relRules").replaceChildren(h("p", { class: "hint" }, "Dopo una ricerca qui compare l'elenco esatto delle regole usate."));
     $("btnRelGeo").disabled = $("btnRelCsv").disabled = true;
+    $("relConfrontoBox").hidden = true;
+    $("relFiltroBox").hidden = true;
+    $("relConfrontoStato").textContent = "";
+    filtro = "tutte"; $("relFiltro").value = "tutte";
   }
 
   function togliImmagine() {
@@ -356,36 +372,61 @@ export function iniziaRilievo(ctx) {
   }
 
   // ----------------------------------------------------------------- risultati
-  function popup(a, u = "m") {
+  function popup(a, u = "m", res = null) {
     return h("div", null,
       h("div", { class: "pt" }, `${a.id}. ${a.tipo}`),
       h("div", { class: "pm" }, `Confidenza ${pct(a.punteggio)} · ${formatDist(a.dimensioneM)}`),
       h("div", { class: "pm" }, `${a.polarita === "positiva" ? "Rilievo" : a.polarita === "negativa" ? "Avvallamento" : "Rilievo e avvallamento"} · contrasto medio ${fmtNum(a.contrastoM, 2)} ${u}`),
       a.sitoNotoM != null ? h("div", { class: "pm" }, `Sito noto più vicino: ${formatDist(a.sitoNotoM)}`) : null,
       a.tagliata ? h("div", { class: "pm" }, "Tocca il bordo dell'area analizzata: forma incompleta.") : null,
+      res ? h("div", { class: "pm" }, h("span", { class: `esito ${res.esito}` }, ETICHETTE_ESITO[res.esito]), ` ${res.motivo}`) : null,
       h("div", { class: "pm" }, "Ipotesi di studio: da verificare con ortofoto, fonti e un sopralluogo autorizzato. Non indica dove scavare."),
     );
   }
 
   function disegnaRisultati(rl, r, c, raggioM) {
-    gruppo.clearLayers();
     const anomalie = rl.anomalie;
-    ultimi = { rl, anomalie, centro: { ...c }, raggioM, impEff: r.impEff, cella: r.griglia.cella, file: info?.nome ?? "", unita: r.griglia.unita ?? "m", servizio: !!info?.servizio, passoM: info?.passoM ?? null };
+    ultimi = { rl, anomalie, centro: { ...c }, raggioM, impEff: r.impEff, cella: r.griglia.cella, file: info?.nome ?? "", unita: r.griglia.unita ?? "m", servizio: !!info?.servizio, passoM: info?.passoM ?? null, confronto: null };
+    filtro = "tutte"; $("relFiltro").value = "tutte";
+    $("relFiltroBox").hidden = true;
+    $("relConfrontoStato").textContent = "";
+    $("relConfrontoBox").hidden = anomalie.length === 0;
+    disegnaElenco();
+    $("relRules").replaceChildren(h("ul", { class: "plain" }, ...rl.regole.map((t) => h("li", null, t))));
+    $("btnRelGeo").disabled = $("btnRelCsv").disabled = anomalie.length === 0;
+  }
+
+  /** Disegna sulla mappa e nell'elenco le anomalie (con l'esito del confronto con la foto, se fatto) rispettando il filtro. */
+  function disegnaElenco() {
+    gruppo.clearLayers();
+    const { anomalie, confronto, unita: u } = ultimi;
+    const esitoDi = (a) => confronto?.risultati.get(a.id) ?? null;
+    const visibili = anomalie.filter((a) => !confronto || filtro === "tutte" || esitoDi(a)?.esito === filtro);
     const marcatori = new Map();
-    for (const a of anomalie) {
-      const col = COLORI[a.codice];
-      const opts = { color: col, weight: a.codice === "lineare" ? 3.5 : 2.5, opacity: 0.55 + 0.4 * a.punteggio, fillColor: col, fillOpacity: 0.14, bubblingMouseEvents: false };
+    for (const a of visibili) {
+      const res = esitoDi(a);
+      const st = res ? STILE_ESITO[res.esito] : {};
+      const col = st.color ?? COLORI[a.codice];
+      const opts = {
+        color: col, weight: st.weight ?? (a.codice === "lineare" ? 3.5 : 2.5), opacity: st.opacity ?? 0.55 + 0.4 * a.punteggio,
+        dashArray: st.dashArray ?? null, fillColor: col, fillOpacity: st.fillOpacity ?? 0.14, bubblingMouseEvents: false,
+      };
       const g = a.geom.tipo === "linea" ? L.polyline(a.geom.coord, opts) : L.polygon(a.geom.coord, opts);
-      g.bindPopup(() => popup(a, r.griglia.unita ?? "m")).addTo(gruppo);
+      g.bindPopup(() => popup(a, u, res)).addTo(gruppo);
       marcatori.set(a.id, g);
     }
     const conteggi = {};
     for (const a of anomalie) conteggi[a.codice] = (conteggi[a.codice] || 0) + 1;
-    $("relLegend").replaceChildren(...Object.keys(COLORI).filter((k) => conteggi[k]).map((k) => h("span", null, h("i", { style: `background:${COLORI[k]}` }), `${NOMI_CLASSE[k]} (${conteggi[k]})`)));
+    const legendaClassi = Object.keys(COLORI).filter((k) => conteggi[k]).map((k) => h("span", null, h("i", { style: `background:${COLORI[k]}` }), `${NOMI_CLASSE[k]} (${conteggi[k]})`));
+    const legendaEsiti = confronto
+      ? ORDINE_ESITI.filter((k) => confronto.riepilogo[k]).map((k) => h("span", null, h("span", { class: `esito ${k}` }, ETICHETTE_ESITO[k]), ` ${confronto.riepilogo[k]}`))
+      : [];
+    $("relLegend").replaceChildren(...legendaClassi, ...legendaEsiti);
     const MAX = 100;
     $("relList").replaceChildren(
-      ...anomalie.slice(0, MAX).map((a) =>
-        h("li", { class: "card" },
+      ...visibili.slice(0, MAX).map((a) => {
+        const res = esitoDi(a);
+        return h("li", { class: "card" },
           h("button", { type: "button", class: "titolo", onclick: () => { map.flyTo([a.lat, a.lon], Math.max(map.getZoom(), 17)); marcatori.get(a.id)?.openPopup(); } },
             `${a.id}. ${a.tipo}, ${formatDist(a.dimensioneM)}, confidenza ${pct(a.punteggio)}`),
           meta(
@@ -393,11 +434,70 @@ export function iniziaRilievo(ctx) {
             fmtCoord(a.lat, a.lon),
             a.sitoNotoM != null ? `sito noto a ${formatDist(a.sitoNotoM)}` : null,
             a.tagliata ? "forma incompleta" : null),
-        )),
-      ...(anomalie.length > MAX ? [h("li", { class: "hint" }, `Elenco ridotto ai primi ${MAX} su ${anomalie.length}: tutti sono sulla mappa e nei file scaricabili.`)] : []),
+          res ? h("div", { class: "motivo" }, h("span", { class: `esito ${res.esito}` }, ETICHETTE_ESITO[res.esito]), ` ${res.motivo}`) : null,
+        );
+      }),
+      ...(confronto && visibili.length < anomalie.length ? [h("li", { class: "hint" }, `Mostrate ${visibili.length} anomalie su ${anomalie.length} (filtro attivo).`)] : []),
+      ...(visibili.length > MAX ? [h("li", { class: "hint" }, `Elenco ridotto ai primi ${MAX} su ${visibili.length}: tutti sono sulla mappa e nei file scaricabili.`)] : []),
     );
-    $("relRules").replaceChildren(h("ul", { class: "plain" }, ...rl.regole.map((t) => h("li", null, t))));
-    $("btnRelGeo").disabled = $("btnRelCsv").disabled = anomalie.length === 0;
+  }
+
+  // ------------------------------------------------- confronto con la foto
+  const MSG_PIXEL = "Da una pagina web il browser non consente di leggere i pixel di questa foto. Usa l'app Android, oppure scegli un'altra foto di riferimento.";
+
+  async function confronta() {
+    if (!ultimi?.anomalie.length || inCorso) return;
+    const id = $("relRif").value;
+    salvato.rif = id; salva();
+    const c = ultimi.centro;
+    const fonte = fonteRiferimento(id, { wms: id === "ortofoto" ? fonteWmsOrtofoto?.(c.lon) : null });
+    const st = (t, err = false) => stato("relConfrontoStato", t, err);
+    if (!fonte) {
+      st("Per usare l'ortofoto del Ministero accendi prima il livello «Ortofoto» tra i Livelli della mappa: così l'app sceglie il formato di richiesta che il servizio accetta.", true);
+      mostraEsito("relConfrontoStato");
+      return;
+    }
+    inCorso = true;
+    occupato($("btnRelConfronta"), true); occupato($("btnRelShow"), true); occupato($("btnRelFind"), true);
+    try {
+      const k = 1 / Math.cos((c.lat * Math.PI) / 180);
+      const mezzo = (ultimi.raggioM * 1.03 + margineFotoM({ cella: ultimi.cella })) * k;
+      const [X, Y] = mercatoreDiretta(c.lat, c.lon);
+      const merc = [X - mezzo, Y - mezzo, X + mezzo, Y + mezzo];
+      const z = Math.min(zoomPerCella(ultimi.cella, c.lat), fonte.zMax);
+      const { zt, ridotto } = zoomUtilizzabile(merc, fonte.zt(z), { maxTessere: fonte.tilePx === 512 ? 40 : 150 });
+      const mosaico = await scaricaMosaico({
+        merc, zt, tilePx: fonte.tilePx, modello: fonte.modello, url: fonte.url,
+        scarica: (u) => scaricaImmagine(u, { win: window, timeoutMs: 45000 }), avanzamento: (t) => st(t),
+      });
+      const { mancanti, tessere } = mosaico;
+      st("Confronto le anomalie con la foto…");
+      const ris = await motore.confronta({ lat: c.lat, lon: c.lon, raggioM: ultimi.raggioM, anomalie: ultimi.anomalie, mosaico }, (t) => st(t));
+      ultimi.confronto = {
+        rif: id, nome: fonte.nome, risultati: new Map(ris.risultati.map((x) => [x.id, x])), riepilogo: ris.riepilogo,
+        passoFotoM: ris.passoFotoM, mancanti, tessere, ridotto, spostamentoMassimoPx: ris.spostamentoMassimoPx,
+      };
+      $("relFiltroBox").hidden = false;
+      disegnaElenco();
+      const rp = ris.riepilogo;
+      const parti = [
+        `Confronto con «${fonte.nome}» fatto`,
+        ORDINE_ESITI.filter((e) => rp[e]).map((e) => `${rp[e]} ${ETICHETTE_ESITO[e].toLowerCase()}`).join(", "),
+        `pixel della foto circa ${fmtNum(ris.passoFotoM, 1)} m`,
+      ];
+      if (mancanti) parti.push(`${mancanti} tessere su ${tessere} non sono arrivate: dove mancano l'anomalia risulta non valutabile`);
+      if (ridotto) parti.push("per tenere leggero il calcolo la foto è a risoluzione ridotta: con un raggio più piccolo si vedono più dettagli");
+      if (rp["non-valutabile"] === ris.risultati.length) parti.push("nessuna anomalia è stata valutata: guarda i motivi nell'elenco");
+      st(frasePuntata(parti), mancanti > 0 && mancanti === tessere);
+    } catch (e) {
+      const msg = messaggioErrore(e);
+      st(`Confronto non riuscito: ${/non riesco a leggere i pixel/i.test(msg) ? MSG_PIXEL : msg}`, true);
+    } finally {
+      inCorso = false;
+      occupato($("btnRelConfronta"), false); occupato($("btnRelShow"), false); occupato($("btnRelFind"), false);
+      abilita();
+      mostraEsito("relConfrontoStato");
+    }
   }
 
   function esporta(tipo) {
@@ -409,7 +509,14 @@ export function iniziaRilievo(ctx) {
         pixel_m: ultimi.cella, raggio_m: ultimi.raggioM, unita_quote: ultimi.unita === "m" ? "metri" : "livelli di grigio relativi (non metri)",
         passo_verticale_m: ultimi.passoM, contrasto_minimo: Number(rl.soglia.toFixed(3)), regole: rl.regole, impostazioni: ultimi.impEff,
         avvertenza_rilievo: "Anomalie dedotte dalla forma del terreno: ipotesi da verificare, non scoperte.",
-      }, ultimi.unita);
+        ...(ultimi.confronto ? {
+          confronto_foto: {
+            foto: ultimi.confronto.nome, pixel_foto_m: Number(ultimi.confronto.passoFotoM.toFixed(2)), riepilogo: ultimi.confronto.riepilogo,
+            spostamento_massimo_px: ultimi.confronto.spostamentoMassimoPx,
+            avvertenza: "«Solo nel LiDAR» significa che nella foto non si distingue nessun segno: non prova che non ci sia (vegetazione, foto sfocata). Soglie non tarate su siti reali.",
+          },
+        } : {}),
+      }, ultimi.unita, ultimi.confronto?.risultati ?? null);
       scarica(nomeFile("anomalie", "geojson"), JSON.stringify(fc, null, 1), "application/geo+json");
     } else {
       scarica(nomeFile("anomalie", "csv"), inCsv(anomalie, [
@@ -424,6 +531,13 @@ export function iniziaRilievo(ctx) {
         { titolo: "lon", valore: (a) => gen(a.lon) },
         { titolo: "sito_noto_piu_vicino_m", valore: (a) => (a.sitoNotoM == null ? "" : Math.round(a.sitoNotoM)) },
         { titolo: "forma_incompleta", valore: (a) => (a.tagliata ? "sì" : "no") },
+        ...(ultimi.confronto ? [
+          { titolo: "foto_esito", valore: (a) => ETICHETTE_ESITO[ultimi.confronto.risultati.get(a.id)?.esito] ?? "" },
+          { titolo: "foto_p", valore: (a) => ultimi.confronto.risultati.get(a.id)?.p ?? "" },
+          { titolo: "foto_contrasto_luminosita", valore: (a) => ultimi.confronto.risultati.get(a.id)?.contrasto ?? "" },
+          { titolo: "foto_vegetazione", valore: (a) => { const v = ultimi.confronto.risultati.get(a.id); return v ? (v.vegetazione ? "sì" : "no") : ""; } },
+          { titolo: "foto_nota", valore: (a) => ultimi.confronto.risultati.get(a.id)?.motivo ?? "" },
+        ] : []),
       ]), "text/csv;charset=utf-8");
     }
   }
@@ -442,6 +556,10 @@ export function iniziaRilievo(ctx) {
   };
   aggiornaEtichette();
 
+  $("relRif").replaceChildren(...ELENCO_RIFERIMENTI.map((f) => h("option", { value: f.id }, f.nome)));
+  $("relRif").value = ELENCO_RIFERIMENTI.some((f) => f.id === salvato.rif) ? salvato.rif : "sat";
+  $("btnRelConfronta").addEventListener("click", confronta);
+  $("relFiltro").addEventListener("change", (e) => { filtro = e.target.value; if (ultimi) disegnaElenco(); });
   $("relFile").addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) apriFile(f); });
   $("btnRelApri").addEventListener("click", () => {
     salvato.epsg = Number($("relEpsg").value); salva();

@@ -15,8 +15,10 @@ import {
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
 import { aggiungiRipiegoNativo, provaTessera } from "./tessere.js";
+import { variantiConPreferita, scegliVariante, fusoCambiato } from "./varianti.js";
+import { creaConfrontoLivelli } from "./tendina.js";
 
-const VERSIONE = "0.3.1";
+const VERSIONE = "0.4.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -122,6 +124,8 @@ map.on("moveend", () => {
 });
 
 new ResizeObserver(() => map.invalidateSize({ pan: false })).observe($("map"));
+map.on("zoomend", () => disegnaRapidi());
+map.on("moveend", () => controllaFuso());
 
 // Mappe di base
 const livelliBase = new Map();
@@ -130,22 +134,25 @@ if (!BASI.some((b) => b.id === baseAttiva)) baseAttiva = "osm";
 for (const b of BASI) livelliBase.set(b.id, creaLivello(L, { ...b, tipo: "tile" }));
 livelliBase.get(baseAttiva).addTo(map);
 
+function cambiaBase(id) {
+  if (sessioneConfronto && !confrontoOccupato) fermaConfronto(); // la mappa di base cambia: il confronto finisce (la parte sincrona rimette la base)
+  if (id === baseAttiva) return;
+  map.removeLayer(livelliBase.get(baseAttiva));
+  baseAttiva = id;
+  livelliBase.get(baseAttiva).addTo(map).bringToBack();
+  mem.set("am.base", baseAttiva);
+  disegnaBasi();
+}
+
 function disegnaBasi() {
   $("baseList").replaceChildren(
     ...BASI.map((b) => {
       const id = "base-" + b.id;
-      const r = h("input", {
-        type: "radio", name: "base", id, checked: b.id === baseAttiva ? true : null,
-        onchange: () => {
-          map.removeLayer(livelliBase.get(baseAttiva));
-          baseAttiva = b.id;
-          livelliBase.get(baseAttiva).addTo(map).bringToBack();
-          mem.set("am.base", baseAttiva);
-        },
-      });
+      const r = h("input", { type: "radio", name: "base", id, checked: b.id === baseAttiva ? true : null, onchange: () => cambiaBase(b.id) });
       return h("div", { class: "opt" }, h("label", { for: id }, r, b.nome));
     }),
   );
+  disegnaRapidi();
 }
 
 // ------------------------------------------------------------ livelli sovrapposti
@@ -167,6 +174,11 @@ function registraSovr(def) {
     stato: def.daVerificare ? "da verificare" : "",
     salute: "", // esito dell'ultima verifica: «risponde», «non risponde», «non verificabile»
     errori: 0,
+    avvisato: false, // l'avviso per le tessere in errore compare una volta sola, non a ogni zoom
+    problema: false, // il livello ha dato errori: lo si vede anche sul pulsante della mappa
+    occupato: false, // sta scegliendo il formato di richiesta o costruendo il livello
+    variante: null, // formato di richiesta scelto (livelli con famiglia di fusi): {id, etichetta, versione, livelli, tile, fuso}
+    esitiVarianti: [],
     urlEffettivo: adattaUrl(def.url),
     livelliEffettivi: def.livelli,
   });
@@ -256,94 +268,166 @@ async function cambiaFonteLidar() {
   if (r) await cambiaRegione(r);
 }
 
-/** Livello di un servizio che ne elenca più d'uno (come l'IGM, uno per fuso): usa la scelta salvata o la chiede. */
-async function sceglieLivelloWms(r) {
-  const chiave = "am.livello." + r.def.id;
-  const salvato = mem.get(chiave, null);
-  if (salvato) { r.livelliEffettivi = salvato; return true; }
-  toast("Leggo i livelli del servizio…");
-  const cap = await caricaCapabilities(r.urlEffettivo);
-  let scelto = cap.livelli[0]?.name;
-  if (cap.livelli.length > 1) {
-    scelto = await scegli("Quale livello?", cap.livelli.map((l) => ({ etichetta: l.title && l.title !== l.name ? `${l.title} (${l.name})` : l.name, valore: l.name })));
+// ---- livelli del Ministero con un livello per fuso (ortofoto, IGM): il formato di richiesta si sceglie provando
+
+/** Tessera di prova di una variante: quella al centro della mappa, a un ingrandimento in cui il livello risponde. */
+function urlProvaVariante(r, v) {
+  const d = r.def;
+  const z = Math.max(d.minZoom ?? 0, Math.min(map.getZoom(), d.maxNativeZoom ?? 19));
+  const zt = v.tile === 512 ? Math.max(0, z - 1) : z; // un'immagine da 512 px copre l'area di una tessera da 256 allo zoom precedente
+  const c = map.getCenter();
+  const { x, y } = tesseraDa(c.lat, c.lng, zt);
+  return urlTessera({ url: r.urlEffettivo, livelli: v.livelli, versione: v.versione, px: v.tile }, zt, x, y);
+}
+
+/** Prova le varianti una dopo l'altra e si ferma alla prima che dà un'immagine non vuota. */
+async function provaVarianti(r, { tutte = false } = {}) {
+  const elenco = variantiConPreferita(r.def.famiglia, map.getCenter().lng, mem.get("am.variante." + r.def.id, null));
+  const esiti = [];
+  for (const v of elenco) {
+    const e = await provaTessera({ url: urlProvaVariante(r, v), win: window });
+    esiti.push({ variante: v, ...e });
+    if (e.ok && !e.vuota && !tutte) break;
   }
-  if (!scelto) return false;
-  mem.set(chiave, scelto);
-  r.livelliEffettivi = scelto;
-  r.stato = scelto;
+  return esiti;
+}
+
+/** Sceglie (provando) il formato di richiesta. Restituisce true se un formato risponde con un'immagine. */
+async function assicuraVariante(r, { forza = false } = {}) {
+  if (r.variante && !forza) return true;
+  const esiti = await provaVarianti(r);
+  r.esitiVarianti = esiti;
+  const { variante, stato } = scegliVariante(esiti);
+  r.messaggio = "";
+  if (!variante) {
+    r.variante = null;
+    r.livelliEffettivi = undefined;
+    r.salute = "non risponde";
+    r.messaggio = esiti[0]?.dettaglio ?? "";
+    return false;
+  }
+  r.variante = variante;
+  r.livelliEffettivi = variante.livelli;
+  mem.set("am.variante." + r.def.id, variante.id);
+  r.salute = stato === "ok" ? "risponde" : "risponde, ma senza immagine qui";
   return true;
 }
 
-async function cambiaLivelloWms(r) {
-  if (r.layer) map.removeLayer(r.layer);
-  r.layer = null;
-  r.on = false;
-  r.livelliEffettivi = undefined;
-  r.stato = "";
-  r.salute = "";
-  mem.del("am.livello." + r.def.id);
-  disegnaSovr();
-  const cb = $("ov-" + r.def.id);
-  cb.checked = true;
-  await alternaSovr(r, cb);
+/** Per il confronto con l'ortofoto del Ministero: servizio e formato di richiesta scelti (o il primo, se non ancora provati). */
+function fonteWmsOrtofoto(lon) {
+  const r = sovr.get("ortofoto");
+  if (!r?.def.famiglia) return null;
+  const idPref = r.variante?.id ?? mem.get("am.variante.ortofoto", null);
+  const v = variantiConPreferita(r.def.famiglia, lon ?? map.getCenter().lng, idPref)[0];
+  return { url: r.urlEffettivo, livelli: v.livelli, versione: v.versione, tile: v.tile };
+}
+
+function messaggioVarianti(r) {
+  if (usaPcn(r.urlEffettivo) && !ambiente().httpConsentito) return messaggioTessere(r);
+  const n = r.esitiVarianti.length;
+  const primo = r.esitiVarianti[0]?.dettaglio;
+  return `«${r.def.nome}»: nessuno dei ${n} formati di richiesta provati ha restituito un'immagine.${primo ? ` Messaggio del servizio: ${primo}.` : ""} Tocca «Perché non si vede?» per l'elenco completo.`;
 }
 
 async function costruisciLivelloSovr(r) {
   const d = r.def;
   if (d.tipo === "wms-regione") {
     if (!(await sceglieLidar(r))) return null;
-  } else if (d.tipo === "wms" && !r.livelliEffettivi) {
-    if (d.scegliLivello) {
-      if (!(await sceglieLivelloWms(r))) return null;
-    } else {
-      toast("Leggo i livelli del servizio…");
-      r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
+  } else if (d.famiglia) {
+    if (!(await assicuraVariante(r))) {
+      r.problema = true;
+      toast(messaggioVarianti(r), 12000);
+      return null;
     }
+  } else if (d.tipo === "wms" && !r.livelliEffettivi) {
+    toast("Leggo i livelli del servizio…");
+    r.livelliEffettivi = await risolviLivelli(d, r.urlEffettivo);
   }
-  const layer = creaLivello(L, d, { url: r.urlEffettivo, livelli: r.livelliEffettivi });
+  const v = r.variante;
+  const layer = creaLivello(L, d, { url: r.urlEffettivo, livelli: r.livelliEffettivi, versione: v?.versione, tileSize: v?.tile });
   layer.setOpacity(r.opacita);
   layer.setZIndex(++zCont);
   if (d.tipo !== "tile") {
-    r.ok = 0; r.nativo = 0; r.messaggio = "";
+    r.ok = 0; r.nativo = 0; r.messaggio = r.messaggio ?? "";
     aggiungiRipiegoNativo(layer, { win: window, stato: r });
     layer.on("tileerror", () => {
-      if (++r.errori === 4) toast(messaggioTessere(r), 9000);
+      // un solo avviso per livello: zoomando i fallimenti si ripetono e un messaggio a ogni zoom disturba soltanto
+      if (++r.errori >= 4 && !r.avvisato) {
+        r.avvisato = true;
+        r.problema = true;
+        toast(messaggioTessere(r), 9000);
+        disegnaSovr();
+      }
     });
     layer.on("tileload", () => { r.errori = 0; });
   }
   return layer;
 }
 
-async function alternaSovr(r, casella) {
-  if (!casella.checked) {
+/** Accende o spegne un livello sovrapposto (dalla lista dei Livelli o dai pulsanti sulla mappa). */
+async function alternaSovr(r, acceso) {
+  if (sessioneConfronto && !confrontoOccupato) {
+    await fermaConfronto(); // l'utente cambia i livelli: il confronto finisce e i livelli tornano come prima
+    if (r.on === acceso) return;
+  }
+  if (r.occupato) return;
+  if (!acceso) {
     if (r.layer) map.removeLayer(r.layer);
     r.on = false;
     salvaSovr();
     disegnaSovr();
     return;
   }
-  casella.disabled = true;
+  if (r.on) return;
+  r.occupato = true;
+  r.avvisato = false;
+  r.problema = false;
+  disegnaSovr();
   try {
     if (!r.layer) r.layer = await costruisciLivelloSovr(r);
-    if (!r.layer) {
-      casella.checked = false;
-      return;
-    }
+    if (!r.layer) return;
     r.layer.addTo(map);
     r.on = true;
     if (r.def.minZoom && map.getZoom() < r.def.minZoom) toast(`«${r.def.nome}» si vede da ingrandimento ${r.def.minZoom}.`);
   } catch (e) {
-    casella.checked = false;
     r.on = false;
     r.stato = "non risponde";
+    r.problema = true;
     toast(r.def.id === "lidar"
       ? `«${r.def.nome}»: ${messaggioErrore(e)}. Per usare il LiDAR carica un file (GeoTIFF) nella scheda Rilievo.`
       : `«${r.def.nome}»: ${messaggioErrore(e)}. Se conosci il nome del livello, aggiungilo a mano da «Aggiungi un servizio WMS».`, 8000);
   } finally {
-    casella.disabled = false;
+    r.occupato = false;
     salvaSovr();
     disegnaSovr();
   }
+}
+
+/** Passando in un altro fuso UTM i livelli a fuso singolo chiedono il livello sbagliato: li sceglie di nuovo. */
+let timerFuso;
+function controllaFuso() {
+  clearTimeout(timerFuso);
+  timerFuso = setTimeout(async () => {
+    const lon = map.getCenter().lng;
+    for (const r of sovr.values()) {
+      if (!r.def.famiglia || !r.on || r.occupato || !fusoCambiato(r.variante, lon)) continue;
+      r.occupato = true;
+      try {
+        if (r.layer) map.removeLayer(r.layer);
+        r.layer = null;
+        r.variante = null;
+        const buona = await assicuraVariante(r, { forza: true });
+        if (buona) {
+          r.layer = await costruisciLivelloSovr(r);
+          r.layer?.addTo(map);
+        }
+        r.on = !!r.layer;
+      } finally {
+        r.occupato = false;
+        disegnaSovr();
+      }
+    }
+  }, 900);
 }
 
 async function cambiaRegione(r) {
@@ -354,9 +438,7 @@ async function cambiaRegione(r) {
   mem.del("am.lidarRegione");
   mem.del("am.lidarLivello");
   disegnaSovr();
-  const cb = $("ov-" + r.def.id);
-  cb.checked = true;
-  await alternaSovr(r, cb);
+  await alternaSovr(r, true);
 }
 
 /** Il proxy è cambiato: i livelli del Ministero vanno ricostruiti con il nuovo indirizzo. */
@@ -370,15 +452,12 @@ function riapplicaProxy() {
     r.on = false;
     r.errori = 0;
     r.salute = "";
+    r.variante = null;
     r.urlEffettivo = adattaUrl(r.def.url);
-    r.livelliEffettivi = r.def.scegliLivello ? mem.get("am.livello." + r.def.id, undefined) : r.def.livelli;
+    r.livelliEffettivi = r.def.famiglia ? undefined : r.def.livelli;
   }
   disegnaSovr();
-  for (const r of daRiaccendere) {
-    const cb = $("ov-" + r.def.id);
-    cb.checked = true;
-    alternaSovr(r, cb);
-  }
+  for (const r of daRiaccendere) alternaSovr(r, true);
 }
 
 function iniziaProxy() {
@@ -414,14 +493,17 @@ function disegnaSovr() {
   $("overlayList").replaceChildren(
     ...[...sovr.values()].map((r) => {
       const id = "ov-" + r.def.id;
-      const cb = h("input", { type: "checkbox", id, checked: r.on ? true : null });
-      cb.addEventListener("change", () => alternaSovr(r, cb));
+      const cb = h("input", { type: "checkbox", id, checked: r.on || r.occupato ? true : null, disabled: r.occupato ? true : null });
+      cb.addEventListener("change", () => alternaSovr(r, cb.checked));
       const classeSalute = r.salute === "risponde" ? "stato ok" : r.salute === "non risponde" ? "stato ko" : "stato";
       return h("div", { class: "opt" },
         h("label", { for: id }, cb,
-          h("span", null, r.def.nome, r.def.nota ? h("span", { class: "nota" }, r.def.nota) : null)),
+          h("span", null, r.def.nome,
+            r.def.nota ? h("span", { class: "nota" }, r.def.nota) : null,
+            r.variante ? h("span", { class: "nota" }, `Formato di richiesta scelto: ${r.variante.etichetta}.`) : null)),
         r.stato ? h("span", { class: r.stato === "non risponde" ? "stato ko" : "stato" }, r.stato) : null,
         r.salute ? h("span", { class: classeSalute }, r.salute) : null,
+        r.problema && !r.salute ? h("span", { class: "stato ko" }, "errori nelle tessere") : null,
         r.on
           ? h("input", {
               type: "range", min: "0.1", max: "1", step: "0.05", value: String(r.opacita), "aria-label": `Trasparenza di ${r.def.nome}`,
@@ -433,12 +515,184 @@ function disegnaSovr() {
         r.def.tipo === "wms-regione" && mem.get("am.lidarRegione", null)
           ? h("button", { type: "button", class: "link", onclick: () => cambiaRegione(r) }, "Cambia zona o livello")
           : null,
-        r.def.scegliLivello && mem.get("am.livello." + r.def.id, null)
-          ? h("button", { type: "button", class: "link", onclick: () => cambiaLivelloWms(r) }, "Cambia livello")
-          : null,
       );
     }),
   );
+  disegnaRapidi();
+}
+
+// ------------------------------------------------- pulsanti sulla mappa
+
+const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite" };
+
+/** Spegne tutti i livelli sovrapposti accesi (le mappe di base restano). */
+function spegniTutti() {
+  for (const r of sovr.values()) {
+    if (!r.on) continue;
+    if (r.layer) map.removeLayer(r.layer);
+    r.on = false;
+  }
+  salvaSovr();
+  disegnaSovr();
+}
+
+function prossimaBase() {
+  const i = BASI.findIndex((b) => b.id === baseAttiva);
+  cambiaBase(BASI[(i + 1) % BASI.length].id);
+}
+
+/** Barra di pulsanti sopra la mappa: accende e spegne i livelli senza aprire il pannello Livelli. */
+function disegnaRapidi() {
+  const barra = $("quick");
+  if (!barra) return;
+  const z = map.getZoom();
+  const rapidi = [...sovr.values()].filter((r) => r.def.rapido);
+  const nomeBase = BASE_BREVE[baseAttiva] ?? baseAttiva;
+  barra.replaceChildren(
+    h("button", { type: "button", class: "chip", title: "Cambia la mappa di base", "aria-label": `Mappa di base: ${nomeBase}. Tocca per cambiarla`, onclick: prossimaBase }, `Base: ${nomeBase}`),
+    ...rapidi.map((r) => {
+      const fuori = r.on && r.def.minZoom && z < r.def.minZoom;
+      const nome = r.def.etichettaRapida ?? r.def.nome;
+      return h("button", {
+        type: "button", class: "chip" + (r.problema ? " avviso" : "") + (fuori ? " fuori" : ""),
+        "aria-pressed": r.on ? "true" : "false", "aria-busy": r.occupato ? "true" : null, disabled: r.occupato ? true : null,
+        title: fuori ? `${r.def.nome}: si vede da ingrandimento ${r.def.minZoom}` : r.problema ? `${r.def.nome}: il servizio ha dato errori` : r.def.nome,
+        "aria-label": `${r.def.nome}: ${r.on ? "acceso" : "spento"}${fuori ? `, si vede da ingrandimento ${r.def.minZoom}` : ""}${r.problema ? ", con errori" : ""}`,
+        onclick: () => alternaSovr(r, !r.on),
+      }, nome, fuori ? ` (zoom ${r.def.minZoom}+)` : null, r.problema ? " !" : null);
+    }),
+    rapidi.some((r) => r.on) ? h("button", { type: "button", class: "chip", "aria-label": "Spegni tutti i livelli sovrapposti", onclick: spegniTutti }, "Spegni tutto") : null,
+    h("button", {
+      type: "button", class: "chip", "aria-pressed": confrontoLivelli.attivo ? "true" : "false",
+      title: "Confronta due livelli con un cursore o a lampeggio",
+      onclick: () => (confrontoLivelli.attivo ? fermaConfronto() : apriConfronto()),
+    }, confrontoLivelli.attivo ? "Ferma confronto" : "Confronta"),
+  );
+}
+
+// ------------------------------------------- confronto a mano fra due livelli (cursore a tendina, lampeggio)
+
+const confrontoLivelli = creaConfrontoLivelli({ map });
+let sessioneConfronto = null; // {accesi, baseTolta, baseAggiunte, sovrUsati}
+let confrontoOccupato = false; // vero mentre l'app stessa accende e spegne livelli per il confronto
+
+const opzioniConfronto = () => [
+  ...BASI.map((b) => ({ id: "base:" + b.id, nome: b.nome })),
+  ...[...sovr.values()].map((r) => ({ id: r.def.id, nome: r.def.nome })),
+];
+
+/** Riempie i due elenchi del confronto, tenendo le scelte già fatte (o l'ultima salvata). */
+function riempiConfronto() {
+  const elenco = opzioniConfronto();
+  const salvato = mem.get("am.confronto", { a: "base:sat", b: "igm25" });
+  for (const [campo, chiave, predefinito] of [["cmpA", "a", "base:sat"], ["cmpB", "b", "igm25"]]) {
+    const el = $(campo);
+    if (!el) continue;
+    const corrente = el.value || salvato[chiave];
+    el.replaceChildren(...elenco.map((o) => h("option", { value: o.id }, o.nome)));
+    el.value = elenco.some((o) => o.id === corrente) ? corrente : predefinito;
+  }
+}
+
+function aggiornaBarraConfronto() {
+  const c = confrontoLivelli;
+  $("cmpBarra").hidden = !c.attivo;
+  if (c.attivo) {
+    $("cmpEtichetta").textContent = c.etichetta();
+    $("btnCmpModo").textContent = c.modo === "tendina" ? "Passa al lampeggio" : "Passa al cursore";
+    $("btnCmpPausa").hidden = $("btnCmpScambia").hidden = c.modo !== "lampeggio";
+    $("btnCmpPausa").textContent = c.inPausa ? "Riprendi" : "Pausa";
+  }
+  disegnaRapidi();
+}
+
+function apriConfronto() {
+  mostraScheda("layers");
+  $("boxConfronta").open = true;
+  statoSheet("half");
+  $("boxConfronta").scrollIntoView?.({ block: "start", behavior: "smooth" });
+}
+
+async function avviaConfronto(modo) {
+  const idA = $("cmpA").value, idB = $("cmpB").value;
+  const msg = $("cmpMsg");
+  if (idA === idB) { msg.textContent = "Scegli due livelli diversi."; return; }
+  mem.set("am.confronto", { a: idA, b: idB });
+  await fermaConfronto();
+  confrontoOccupato = true;
+  msg.textContent = "Preparo i due livelli…";
+  const s = { accesi: [...sovr.values()].filter((r) => r.on).map((r) => r.def.id), baseTolta: livelliBase.get(baseAttiva), baseAggiunte: [], sovrUsati: [] };
+  sessioneConfronto = s;
+  try {
+    // si vedono solo i due livelli scelti: gli altri e la mappa di base si tolgono e tornano alla fine
+    for (const r of sovr.values()) if (r.on) { if (r.layer) map.removeLayer(r.layer); r.on = false; }
+    map.removeLayer(s.baseTolta);
+    const prendi = async (id) => {
+      if (id.startsWith("base:")) {
+        const l = livelliBase.get(id.slice(5));
+        l.addTo(map).bringToBack();
+        s.baseAggiunte.push(l);
+        return { nome: BASI.find((b) => b.id === id.slice(5))?.nome ?? id, layer: l };
+      }
+      const r = sovr.get(id);
+      if (!r) return null;
+      await alternaSovr(r, true);
+      if (!r.on || !r.layer) return null;
+      s.sovrUsati.push(r);
+      return { nome: r.def.nome, layer: r.layer };
+    };
+    const A = await prendi(idA);
+    const B = A ? await prendi(idB) : null;
+    if (!A || !B) {
+      confrontoOccupato = false;
+      await fermaConfronto();
+      msg.textContent = "Uno dei due livelli non risponde: guarda l'avviso e prova con «Perché non si vede?».";
+      return;
+    }
+    confrontoLivelli.avvia({ a: A, b: B, modo, quando: aggiornaBarraConfronto });
+    const minimi = [idA, idB].map((id) => sovr.get(id)?.def.minZoom ?? 0);
+    const serve = Math.max(...minimi);
+    msg.textContent = serve && map.getZoom() < serve ? `Ingrandisci la mappa (da ingrandimento ${serve}) per vedere entrambi i livelli.` : "";
+    aggiornaBarraConfronto();
+    statoSheet("closed");
+  } finally {
+    confrontoOccupato = false;
+  }
+}
+
+/** Chiude il confronto e rimette mappa di base e livelli come prima. La parte che rimette la base è sincrona. */
+async function fermaConfronto() {
+  confrontoLivelli.ferma();
+  const s = sessioneConfronto;
+  sessioneConfronto = null;
+  if (!s) { aggiornaBarraConfronto(); return; }
+  const era = confrontoOccupato;
+  confrontoOccupato = true;
+  try {
+    for (const l of s.baseAggiunte) map.removeLayer(l);
+    livelliBase.get(baseAttiva).addTo(map).bringToBack();
+    for (const r of s.sovrUsati) { if (r.layer) map.removeLayer(r.layer); r.on = false; }
+    aggiornaBarraConfronto();
+    for (const id of s.accesi) {
+      const r = sovr.get(id);
+      if (r && !r.on) await alternaSovr(r, true);
+    }
+  } finally {
+    confrontoOccupato = era;
+    salvaSovr();
+    disegnaSovr();
+    aggiornaBarraConfronto();
+  }
+}
+
+function iniziaConfronto() {
+  riempiConfronto();
+  $("btnCmpTendina").addEventListener("click", () => avviaConfronto("tendina"));
+  $("btnCmpLampeggio").addEventListener("click", () => avviaConfronto("lampeggio"));
+  $("btnCmpModo").addEventListener("click", () => confrontoLivelli.impostaModo(confrontoLivelli.modo === "tendina" ? "lampeggio" : "tendina"));
+  $("btnCmpPausa").addEventListener("click", () => (confrontoLivelli.inPausa ? confrontoLivelli.riprendi() : confrontoLivelli.pausa()));
+  $("btnCmpScambia").addEventListener("click", () => confrontoLivelli.scambia());
+  $("btnCmpFerma").addEventListener("click", () => fermaConfronto());
 }
 
 /** Tessera di prova di un livello: quella al centro della mappa, a un ingrandimento in cui il livello risponde. */
@@ -450,9 +704,17 @@ function urlProvaTessera(r) {
   return urlTessera({ url: r.urlEffettivo, livelli: r.livelliEffettivi, versione: d.versione ?? "1.3.0", crs: d.crs ?? "EPSG:3857" }, z, x, y);
 }
 
+/** Ricostruisce il livello acceso con la variante appena scelta. */
+async function ricostruisciLivello(r) {
+  if (r.layer) map.removeLayer(r.layer);
+  r.layer = await costruisciLivelloSovr(r);
+  if (r.layer) r.layer.addTo(map); else r.on = false;
+}
+
 /**
  * «Verifica servizi» / «Perché non si vede?»: per ogni servizio WMS chiede la tessera vera al centro della mappa
  * e racconta che cosa risponde (anche il messaggio del servizio, se è un errore), con miniatura e indirizzo.
+ * Per i livelli con un livello per fuso (ortofoto, IGM) prova tutti i formati di richiesta e usa il primo che funziona.
  */
 async function verificaServizi() {
   const btns = [$("btnProbe"), $("btnDiag")];
@@ -467,27 +729,38 @@ async function verificaServizi() {
     for (const r of wms) {
       let e = null;
       let nota = "";
+      let righe = [];
+      r.avvisato = false;
       try {
         if (r.def.tipo === "wms-regione") {
           if (!mem.get("am.lidarRegione", null)) throw Object.assign(new Error("regione non ancora scelta"), { sceltaMancante: true });
           if (!r.livelliEffettivi) await sceglieLidar(r);
           else r.urlEffettivo = adattaUrl(urlRegione(r.def, mem.get("am.lidarRegione", null)));
-        } else if (!r.livelliEffettivi) {
-          if (r.def.scegliLivello) {
-            const salvato = mem.get("am.livello." + r.def.id, null);
-            if (salvato) {
-              r.livelliEffettivi = salvato;
-            } else {
-              const cap = await caricaCapabilities(r.urlEffettivo);
-              r.livelliEffettivi = cap.livelli[0].name;
-              nota = `Provato il primo livello elencato (${r.livelliEffettivi}); per sceglierne un altro accendi il livello e poi «Cambia livello».`;
-            }
+          e = await provaTessera({ url: urlProvaTessera(r), win: window });
+        } else if (r.def.famiglia) {
+          const esiti = await provaVarianti(r, { tutte: true });
+          r.esitiVarianti = esiti;
+          righe = esiti.map((x) => ({ ok: x.ok && !x.vuota, testo: `${x.variante.id}. ${x.variante.etichetta}: ${x.ok ? (x.vuota ? "risponde ma l'immagine è vuota" : "immagine ricevuta") : x.dettaglio}.` }));
+          const { variante, stato } = scegliVariante(esiti);
+          if (variante) {
+            const cambiata = r.variante?.id !== variante.id;
+            r.variante = variante;
+            r.livelliEffettivi = variante.livelli;
+            mem.set("am.variante." + r.def.id, variante.id);
+            e = esiti.find((x) => x.variante.id === variante.id);
+            nota = `Formato scelto: ${variante.etichetta}${stato === "vuota" ? ". Nessun formato ha disegnato qualcosa in questo punto: avvicinati o sposta la mappa" : ""}.`;
+            if (cambiata && r.on) await ricostruisciLivello(r);
           } else {
-            r.livelliEffettivi = await risolviLivelli(r.def, r.urlEffettivo);
+            r.variante = null;
+            e = { ...esiti[0], ok: false };
+            nota = "Nessun formato di richiesta ha restituito un'immagine. Se il messaggio parla di file di indici (msShapefileOpen), il guasto è sul server del Ministero.";
           }
+        } else {
+          if (!r.livelliEffettivi) r.livelliEffettivi = await risolviLivelli(r.def, r.urlEffettivo);
+          e = await provaTessera({ url: urlProvaTessera(r), win: window });
         }
-        e = await provaTessera({ url: urlProvaTessera(r), win: window });
-        r.salute = e.ok ? "risponde" : "non risponde";
+        r.salute = e.ok ? (e.vuota ? "risponde, ma senza immagine qui" : "risponde") : "non risponde";
+        r.problema = !e.ok;
         if (e.ok) ok++;
       } catch (err) {
         r.salute = err.sceltaMancante ? "scegli la regione" : "non verificabile";
@@ -500,6 +773,7 @@ async function verificaServizi() {
           ? h("div", { class: e.ok ? "pm" : "pm stato ko" }, e.ok ? `Risponde: ${e.dettaglio}.` : `Non risponde bene: ${e.dettaglio}.`)
           : null,
         nota ? h("div", { class: "hint" }, nota) : null,
+        righe.length ? h("details", null, h("summary", null, `Formati provati (${righe.length})`), ...righe.map((x) => h("div", { class: x.ok ? "hint" : "hint stato ko" }, x.testo))) : null,
         e ? h("div", { class: "hint" }, `Prova fatta con: ${e.via}.${r.on ? ` Tessere mostrate finora: ${r.ok ?? 0}${r.nativo ? ` (${r.nativo} con il ripiego dell'app)` : ""}.` : ""}${r.messaggio ? " Ultimo messaggio: " + r.messaggio + "." : ""}`) : null,
         e?.miniatura ? h("img", { src: e.miniatura, alt: "Tessera ricevuta dal servizio", width: "96", height: "96", style: "background:#888;border:1px solid #666;margin:4px 0" }) : null,
         e ? h("details", null, h("summary", null, "Indirizzo provato"), h("code", { style: "word-break:break-all;font-size:11px" }, e.url)) : null,
@@ -572,9 +846,7 @@ function iniziaWms() {
     const r = sovr.get(def.id);
     r.stato = "";
     disegnaSovr();
-    const cb = $("ov-" + def.id);
-    cb.checked = true;
-    await alternaSovr(r, cb);
+    await alternaSovr(r, true);
     msg.textContent = "Aggiunto. Lo trovi in «Livelli sovrapposti».";
   });
 }
@@ -1200,12 +1472,13 @@ function avvia() {
   disegnaSovr();
   disegnaCategorie();
   iniziaWms();
+  iniziaConfronto();
   iniziaImp();
   mostraImp();
   aggiornaRete();
   rilievo = iniziaRilievo({
     map, $, toast, occupato, stato, mostraEsito, messaggioErrore, ottieniCentro, getCentro: () => centro, impostaCentro,
-    fmtCoord, gen, pubblica, metaEsportazione, nomeFile, sorgenteLidar, fonteLidar, cambiaFonteLidar,
+    fmtCoord, gen, pubblica, metaEsportazione, nomeFile, sorgenteLidar, fonteLidar, cambiaFonteLidar, fonteWmsOrtofoto,
     cerchio: (km) => { if (schedaAttiva === "relief") { raggioCerchioKm = km; aggiornaCerchio(); } },
   });
 
@@ -1237,8 +1510,7 @@ function avvia() {
   // Riattiva i livelli sovrapposti lasciati accesi nell'ultima sessione.
   for (const r of sovr.values()) {
     if (!r.wantOn || r.def.tipo === "wms-regione" && !mem.get("am.lidarRegione", null)) continue;
-    const cb = $("ov-" + r.def.id);
-    if (cb) { cb.checked = true; alternaSovr(r, cb); }
+    alternaSovr(r, true);
   }
 
   const legale = $("legalDialog");

@@ -58,7 +58,7 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
 
   async function chiama(op, dati, avanzamento) {
     await avvia();
-    if (daRiaprire && op === "analizza" && !locale) {
+    if (daRiaprire && (op === "analizza" || op === "confronta") && !locale) {
       daRiaprire = false;
       await chiama(ultimaApertura.op, ultimaApertura.dati);
     }
@@ -66,12 +66,13 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
       if (op === "apri") return locale.apri(dati.file, dati.opzioni);
       if (op === "apriPixel") return locale.apriPixel(dati);
       if (op === "analizza") return locale.analizza(dati, avanzamento);
+      if (op === "confronta") return locale.confronta(dati, avanzamento);
       return locale.chiudi();
     }
     return new Promise((risolvi, rifiuta) => {
       const n = ++id;
       attese.set(n, { risolvi, rifiuta, avanzamento });
-      worker.postMessage({ id: n, op, dati });
+      worker.postMessage({ id: n, op, dati }, op === "confronta" && dati?.mosaico?.rgba ? [dati.mosaico.rgba.buffer] : []);
     });
   }
 
@@ -80,6 +81,8 @@ export function creaMotore({ crea = (url) => new Worker(url, { type: "module" })
     /** Griglia già scaricata dal servizio (la copia resta qui per poter riaprire dopo un arresto del calcolo). */
     apriPixel: (griglia) => { ultimaApertura = { op: "apriPixel", dati: griglia }; return chiama("apriPixel", griglia); },
     analizza: (parametri, avanzamento) => chiama("analizza", parametri, avanzamento),
+    /** Confronto delle anomalie con una foto; il buffer della foto passa al calcolo (non resta utilizzabile qui). */
+    confronta: (parametri, avanzamento) => chiama("confronta", parametri, avanzamento),
     chiudi: () => chiama("chiudi", null),
     get modalita() { return modalita; },
     pronto: () => avvia(),

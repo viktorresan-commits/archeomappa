@@ -9,6 +9,7 @@ import {
   coloraVisualizzazione, riproiettaPerMappa,
 } from "./visual.js";
 import { rileva, impostazioniPredefinite } from "./detect.js";
+import { confrontaConFoto } from "./confronto.js";
 
 export const VISUALIZZAZIONI = [
   { id: "multi", nome: "Ombreggiatura multidirezionale" },
@@ -60,6 +61,17 @@ export function creaSessione() {
   let meta = null;
   let cache = null; // {chiave, g}
 
+  /** La griglia attorno al centro: quella in cache se centro e raggio non sono cambiati. */
+  async function assicuraGriglia(p, avanzamento = () => {}) {
+    const chiave = `${p.lat.toFixed(6)},${p.lon.toFixed(6)},${p.raggioM}`;
+    if (!cache || cache.chiave !== chiave) {
+      avanzamento("Leggo il rilievo…");
+      await pausa();
+      cache = { chiave, g: await estraiGriglia(meta, p.lat, p.lon, p.raggioM), pieno: null };
+    }
+    return cache.g;
+  }
+
   return {
     async apri(file, opzioni = {}) {
       meta = await apriRilievo(file, opzioni);
@@ -81,13 +93,7 @@ export function creaSessione() {
     async analizza(p, avanzamento = () => {}) {
       if (!meta) throw new Error("Nessun rilievo aperto.");
       const t0 = Date.now();
-      const chiave = `${p.lat.toFixed(6)},${p.lon.toFixed(6)},${p.raggioM}`;
-      if (!cache || cache.chiave !== chiave) {
-        avanzamento("Leggo il rilievo…");
-        await pausa();
-        cache = { chiave, g: await estraiGriglia(meta, p.lat, p.lon, p.raggioM), pieno: null };
-      }
-      const g = cache.g;
+      const g = await assicuraGriglia(p, avanzamento);
       g.unita = meta.relativo ? "livelli" : "m";
       const impEff = { ...impostazioniPredefinite(g.cella), ...(p.imp ?? {}) };
       const t1 = Date.now();
@@ -115,6 +121,19 @@ export function creaSessione() {
       }
       out.ms = { lettura: t1 - t0, immagine: t2 - t1, rilevamento: Date.now() - t2 };
       return out;
+    },
+
+    /**
+     * Confronta le anomalie già trovate con una foto della stessa zona.
+     * p = {lat, lon, raggioM (gli stessi dell'analisi), anomalie, mosaico:{rgba,w,h,merc}, passoFotoM?}
+     * Restituisce {risultati, riepilogo, passoFotoM, spostamentoMassimoPx}.
+     */
+    async confronta(p, avanzamento = () => {}) {
+      if (!meta) throw new Error("Nessun rilievo aperto.");
+      const g = await assicuraGriglia(p, avanzamento);
+      avanzamento("Confronto le anomalie con la foto…");
+      await pausa();
+      return confrontaConFoto({ anomalie: p.anomalie, g, mosaico: p.mosaico, passoFotoM: p.passoFotoM ?? null });
     },
 
     chiudi() { meta = null; cache = null; },

@@ -250,7 +250,9 @@ export function misuraForma(pix, w, lrmV) {
     allungamento: Math.sqrt(l1 / l2), lunghezza: rett.a, larghezza: rett.b, aHull, pHull,
     solidita: Math.min(1, piena / aHull), rettangolarita: Math.min(1, piena / Math.max(1, rett.area)),
     circolarita: Math.min(1, (4 * Math.PI * aHull) / (pHull * pHull)),
-    positivi: pos / n, contrasto: somAbs / n, mediaLrm: somma / n, rms, asse: [ux, uy], hull,
+    positivi: pos / n, contrasto: somAbs / n, mediaLrm: somma / n, rms, asse: [ux, uy],
+    // il contorno è stato calcolato nella finestra locale (con 1 pixel di bordo): lo riporto nei pixel della griglia
+    hull: hull.map(([x, y]) => [x + minx - 1, y + miny - 1]),
   };
 }
 
@@ -308,14 +310,14 @@ function segna(maschera, w, h, pt) {
   const c = Math.round(pt[0]), r = Math.round(pt[1]);
   if (c >= 0 && r >= 0 && c < w && r < h) maschera[r * w + c] = 1;
 }
-function rasterizzaLinea(maschera, w, h, linea) {
+export function rasterizzaLinea(maschera, w, h, linea) {
   for (let i = 0; i + 1 < linea.length; i++) {
     const [x0, y0] = linea[i], [x1, y1] = linea[i + 1];
     const passi = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2));
     for (let s = 0; s <= passi; s++) segna(maschera, w, h, [x0 + ((x1 - x0) * s) / passi, y0 + ((y1 - y0) * s) / passi]);
   }
 }
-function rasterizzaPoligono(maschera, w, h, poly) {
+export function rasterizzaPoligono(maschera, w, h, poly) {
   let miny = Infinity, maxy = -Infinity;
   for (const p of poly) { if (p[1] < miny) miny = p[1]; if (p[1] > maxy) maxy = p[1]; }
   for (let r = Math.max(0, Math.floor(miny)); r <= Math.min(h - 1, Math.ceil(maxy)); r++) {
@@ -453,7 +455,16 @@ export function rileva(g, imp, esterni = {}) {
   return out;
 }
 
-export function anomalieInGeoJSON(anomalie, meta = {}, unita = "m") {
+/** Proprietà del confronto con la foto per una anomalia (vuote se il confronto non è stato fatto). */
+function propFoto(r) {
+  if (!r) return {};
+  return {
+    foto_esito: r.esito, foto_p: r.p, foto_contrasto_luminosita: r.contrasto, foto_vegetazione: r.vegetazione,
+    foto_spostamento_px: r.spostamentoPx ? r.spostamentoPx.join(",") : null, foto_nota: r.motivo,
+  };
+}
+
+export function anomalieInGeoJSON(anomalie, meta = {}, unita = "m", confronto = null) {
   const chiaveContrasto = unita === "m" ? "contrasto_m" : "contrasto_livelli"; // livelli di grigio relativi: non sono metri
   return {
     type: "FeatureCollection",
@@ -465,6 +476,7 @@ export function anomalieInGeoJSON(anomalie, meta = {}, unita = "m") {
         dimensione_m: Math.round(a.dimensioneM), area_m2: Math.round(a.areaM2), [chiaveContrasto]: Number(a.contrastoM.toFixed(2)),
         sito_noto_piu_vicino_m: a.sitoNotoM == null ? null : Math.round(a.sitoNotoM), tagliata_dal_bordo: a.tagliata,
         centro_lat: Number(a.lat.toFixed(6)), centro_lon: Number(a.lon.toFixed(6)),
+        ...propFoto(confronto?.get(a.id)),
       },
       geometry: a.geom.tipo === "linea"
         ? { type: "LineString", coordinates: a.geom.coord.map(([la, lo]) => [lo, la]) }

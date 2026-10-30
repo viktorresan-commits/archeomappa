@@ -80,6 +80,8 @@ export const SOVRAPPOSIZIONI = [
     maxNativeZoom: 13,
     maxZoom: 19,
     opacita: 0.5,
+    rapido: true,
+    etichettaRapida: "Ombre",
     attr: "Rilievo © Esri",
     nota: "Aiuta a leggere terrazzamenti, argini e fossati. Non è LiDAR.",
   },
@@ -94,34 +96,83 @@ export const SOVRAPPOSIZIONI = [
     crs: "EPSG:4258",
     minZoom: 15,
     opacita: 0.85,
+    rapido: true,
+    etichettaRapida: "Catasto",
     attr: "© Agenzia delle Entrate (CC BY 4.0)",
     nota: "Visibile solo a scala di dettaglio (zoom 15 o più).",
     daVerificare: true,
   },
   {
     id: "ortofoto",
-    nome: "Ortofoto (Geoportale nazionale)",
+    nome: "Ortofoto 2012 (Geoportale nazionale)",
     tipo: "wms",
     url: WMS_PCN + "raster/ortofoto_colore_12.map",
-    livelli: "OI.ORTOIMMAGINI.2012.33",
-    versione: "1.1.1",
+    // Un livello per fuso (nome.32 e nome.33): la richiesta giusta si sceglie provando (js/varianti.js).
+    famiglia: "OI.ORTOIMMAGINI.2012",
+    minZoom: 9, // sotto scala regionale il servizio non disegna nulla
     maxNativeZoom: 18,
     opacita: 1,
+    rapido: true,
+    etichettaRapida: "Ortofoto",
     attr: "© Ministero dell'Ambiente e della Sicurezza Energetica – Geoportale Nazionale",
-    nota: "Ortofoto del 2012. Servizio del Ministero: vedi la nota sul LiDAR qui sotto.",
+    nota: "Ortofoto del 2012, da zoom 9. Servizio del Ministero: se non si vede, «Verifica servizi» prova da sola più formati di richiesta e dice cosa risponde il server.",
     daVerificare: true,
   },
   {
     id: "igm25",
-    nome: "IGM 1:25.000",
+    nome: "IGM 1:25.000 (Geoportale nazionale)",
     tipo: "wms",
     url: WMS_PCN + "raster/IGM_25000.map",
-    scegliLivello: true, // il servizio ne elenca più d'uno (per fuso): se uno dà errore se ne può provare un altro
+    famiglia: "CB.IGM25000",
+    minZoom: 12, // la carta 1:25.000 compare solo da vicino
+    maxNativeZoom: 17,
     opacita: 0.9,
+    rapido: true,
+    etichettaRapida: "IGM",
     attr: "© Istituto Geografico Militare – Geoportale Nazionale",
-    nota: "Cartografia storica: toponimi utili per ricerche d'archivio. Se la verifica riporta un errore sul file degli indici (msShapefileOpen), è un guasto del servizio del Ministero, non dell'app: prova un altro livello con «Cambia livello».",
+    nota: "Cartografia storica: toponimi utili per ricerche d'archivio. Compare solo da zoom 12. Se il server del Ministero ha un guasto sui file degli indici (errore msShapefileOpen), l'app lo mostra com'è: non si può riparare da qui.",
     daVerificare: true,
   },
+  {
+    id: "igm100",
+    nome: "IGM 1:100.000 (Geoportale nazionale)",
+    tipo: "wms",
+    url: WMS_PCN + "raster/IGM_100000.map",
+    famiglia: "MB.IGM100000",
+    minZoom: 9,
+    maxNativeZoom: 15,
+    opacita: 0.9,
+    attr: "© Istituto Geografico Militare – Geoportale Nazionale",
+    nota: "Carta d'insieme, utile a scala larga (zoom 9 e oltre).",
+    daVerificare: true,
+  },
+  {
+    id: "topoesri",
+    nome: "Carta topografica (Esri)",
+    tipo: "tile",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    maxNativeZoom: 19,
+    maxZoom: 19,
+    opacita: 0.9,
+    attr: "© Esri, HERE, Garmin, OpenStreetMap",
+    nota: "Carta con strade, edifici e curve di livello attuali: serve al confronto con il satellite quando l'IGM non risponde.",
+  },
+  ...[
+    ["wb2014", "2014", 10],
+    ["wb2018", "2018", 8255],
+    ["wb2022", "2022", 16245],
+    ["wb2026", "2026", 32246],
+  ].map(([id, anno, rilascio]) => ({
+    id,
+    nome: `Satellite Esri ${anno} (storico)`,
+    tipo: "tile",
+    url: `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${rilascio}/{z}/{y}/{x}`,
+    maxNativeZoom: 18,
+    maxZoom: 19,
+    opacita: 1,
+    attr: "Immagini © Esri, Maxar, Earthstar Geographics (Wayback)",
+    nota: "Rilascio di Esri Wayback, circa " + anno + ": la data è quella del rilascio, non di ogni fotogramma. Utile a vedere tracce nelle colture in anni diversi.",
+  })),
   {
     id: "lidar",
     nome: "LiDAR (Geoportale nazionale)",
@@ -151,6 +202,8 @@ export const SOVRAPPOSIZIONI = [
     versione: "1.1.1",
     maxNativeZoom: 17,
     opacita: 0.8,
+    rapido: true,
+    etichettaRapida: "LiDAR",
     attr: "© MASE – Piano Straordinario di Telerilevamento Ambientale (CC BY 4.0)",
     nota: "Per ora Marche e Umbria. Il servizio del Ministero è raggiungibile in http: nell'app Android funziona, dal sito (https) serve un proxy (vedi sotto) oppure carica un file nella scheda Rilievo.",
     daVerificare: true,
@@ -160,7 +213,7 @@ export const SOVRAPPOSIZIONI = [
 /** Servizi WMS proposti nel menu "servizi noti" (si possono sempre incollare altri indirizzi). */
 export const SERVIZI_NOTI = [
   { nome: "Catasto – particelle (Agenzia delle Entrate)", url: "https://wms.cartografia.agenziaentrate.gov.it/inspire/wms/ows01.php" },
-  { nome: "Ortofoto (Geoportale nazionale)", url: WMS_PCN + "raster/ortofoto_colore_12.map" },
+  { nome: "Ortofoto 2012 (Geoportale nazionale)", url: WMS_PCN + "raster/ortofoto_colore_12.map" },
   { nome: "IGM 1:25.000 (Geoportale nazionale)", url: WMS_PCN + "raster/IGM_25000.map" },
   { nome: "IGM 1:100.000 (Geoportale nazionale)", url: WMS_PCN + "raster/IGM_100000.map" },
   { nome: "SITAP – vincoli paesaggistici (solo http: funziona nell'app Android)", url: "http://sitap.beniculturali.it:8080/geoserver/apar.public/wms" },
@@ -177,7 +230,7 @@ export function prodottiRegione(def, regione) {
 }
 
 /** Crea il livello Leaflet. `L` viene passato dal chiamante (nessun globale qui). */
-export function creaLivello(L, def, { livelli, url } = {}) {
+export function creaLivello(L, def, { livelli, url, versione, tileSize } = {}) {
   const comuni = { attribution: def.attr, opacity: def.opacita ?? 1, maxZoom: def.maxZoom ?? 19 };
   if (def.minZoom) comuni.minZoom = def.minZoom;
   if (def.tipo === "tile" || def.url?.includes("{z}")) {
@@ -189,6 +242,7 @@ export function creaLivello(L, def, { livelli, url } = {}) {
     });
   }
   if (def.maxNativeZoom) comuni.maxNativeZoom = def.maxNativeZoom;
+  if (tileSize) comuni.tileSize = tileSize; // 512: meno richieste, come l'app Grok
   if (def.crs === "EPSG:4258") {
     // Leaflet sa chiedere solo in 3857: qui la tessera si calcola in gradi, nell'ordine di assi del WMS 1.3.0
     const Capa = L.TileLayer.extend({
@@ -203,7 +257,7 @@ export function creaLivello(L, def, { livelli, url } = {}) {
     layers: livelli ?? def.livelli,
     format: "image/png",
     transparent: true,
-    version: def.versione ?? "1.3.0",
+    version: versione ?? def.versione ?? "1.3.0",
   });
 }
 
@@ -221,15 +275,15 @@ export function tesseraDa(lat, lon, z) {
 }
 
 /**
- * GetMap 256×256 della tessera z/x/y, nello stesso formato delle app che già funzionano con questi servizi.
+ * GetMap della tessera z/x/y (256×256 px, o `px`), nello stesso formato delle app che già funzionano con questi servizi.
  * crs: EPSG:3857 (predefinito) o EPSG:4258 (gradi; con WMS 1.3.0 l'ordine degli assi è latitudine, longitudine).
  */
-export function urlTessera({ url, livelli, versione = "1.1.1", crs = "EPSG:3857" }, z, x, y) {
+export function urlTessera({ url, livelli, versione = "1.1.1", crs = "EPSG:3857", px = 256 }, z, x, y) {
   const n = 2 ** z;
   const sep = url.includes("?") ? "&" : "?";
   const nomeCrs = versione === "1.1.1" ? "SRS" : "CRS";
   const testa = `${url}${sep}SERVICE=WMS&VERSION=${versione}&REQUEST=GetMap&LAYERS=${livelli}&STYLES=&${nomeCrs}=${crs}&BBOX=`;
-  const coda = "&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true";
+  const coda = `&WIDTH=${px}&HEIGHT=${px}&FORMAT=image/png&TRANSPARENT=true`;
   if (crs === "EPSG:4258") {
     const lat = (yy) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * yy) / n))) * 180) / Math.PI;
     const lon = (xx) => (xx / n) * 360 - 180;

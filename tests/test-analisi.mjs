@@ -114,6 +114,48 @@ test("GeoTIFF in gradi (EPSG:4326, come i DTM del PST): ricampionato e anomalie 
   assert.ok(s0 < v.centro[0] && n0 > v.centro[0] && o0 < v.centro[1] && e0 > v.centro[1]);
 });
 
+
+test("confronta: su un rilievo vero, il segno presente nella foto finta risulta «visibile», il resto no (e il risultato è copiabile)", async () => {
+  const { mercatoreDiretta } = await import("../js/proj.js");
+  const s = creaSessione();
+  await s.apri(aFile("dtm_2m_deflate.tif"));
+  const p = { ...C, raggioM: 1500 };
+  const r = await s.analizza({ ...p, vis: { tipo: "multi" }, cercaAnomalie: true });
+  const an = r.rilevamento.anomalie;
+  assert.ok(an.length >= 3, `anomalie: ${an.length}`);
+  const bersaglio = an.find((a) => a.codice === "circolare") ?? an[0];
+  const k = 1 / Math.cos((C.lat * Math.PI) / 180);
+  const [cx, cy] = mercatoreDiretta(C.lat, C.lon);
+  const [X0, Y0] = mercatoreDiretta(bersaglio.lat, bersaglio.lon);
+  const meta = 1900 * k, passo = 2 * k; // pixel della foto: 2 m a terra
+  const lato = Math.round((2 * meta) / passo);
+  const rgba = new Uint8ClampedArray(lato * lato * 4);
+  let seme = 12345;
+  const casuale = () => { seme = (Math.imul(seme, 1664525) + 1013904223) >>> 0; return seme / 4294967296; };
+  const raggio = (bersaglio.dimensioneM / 2) * k;
+  for (let v = 0; v < lato; v++) {
+    for (let u = 0; u < lato; u++) {
+      const X = cx - meta + (u + 0.5) * passo, Y = cy + meta - (v + 0.5) * passo;
+      const dentro = Math.hypot(X - X0, Y - Y0) < raggio;
+      const val = Math.round(110 + (dentro ? 60 : 0) + (casuale() + casuale() - 1) * 10);
+      const o = (v * lato + u) * 4;
+      rgba[o] = rgba[o + 1] = rgba[o + 2] = val; rgba[o + 3] = 255;
+    }
+  }
+  const mosaico = { rgba, w: lato, h: lato, merc: [cx - meta, cy - meta, cx + meta, cy + meta] };
+  const fasi = [];
+  const c = await s.confronta({ ...p, anomalie: an, mosaico }, (t) => fasi.push(t));
+  assert.doesNotThrow(() => structuredClone(c));
+  assert.equal(c.risultati.length, an.length);
+  const e = c.risultati.find((x) => x.id === bersaglio.id);
+  assert.equal(e.esito, "anche-foto", JSON.stringify(e));
+  assert.ok(c.risultati.some((x) => x.id !== bersaglio.id && x.esito !== "anche-foto"), "le altre anomalie non dovrebbero risultare tutte visibili");
+  assert.ok(fasi.includes("Confronto le anomalie con la foto…"));
+});
+test("senza file aperto, confronta dà un errore chiaro", async () => {
+  await assert.rejects(() => creaSessione().confronta({ ...C, raggioM: 500, anomalie: [], mosaico: {} }), /Nessun rilievo/);
+});
+
 console.log("motore");
 const CREA_FALLISCE = () => { throw new Error("Worker non disponibile"); };
 test("senza Web Worker usa il thread principale e funziona", async () => {
