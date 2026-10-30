@@ -138,6 +138,20 @@
         <div id="panel-relief" class="panel" role="tabpanel" hidden>
           <h2>Rilievo LiDAR e anomalie</h2>
           <p class="hint">Carica un modello digitale del terreno (DTM) in GeoTIFF o ASCII Grid. Il file resta sul dispositivo: viene letto qui, non inviato a nessuno. L'app lo mostra in varie visualizzazioni e cerca recinti, tumuli e tracciati dalla forma del terreno.</p>
+          <details class="box">
+            <summary>Dove trovo un file LiDAR?</summary>
+            <p><strong>PST, Ministero dell'Ambiente</strong> (LiDAR ad alta risoluzione, copertura parziale). Meglio da computer:</p>
+            <ol class="plain">
+              <li>Apri il <a href="https://sim.mase.gov.it/portalediaccesso/mappe/#/viewer/new" target="_blank" rel="noopener noreferrer">portale del Geoportale</a>.</li>
+              <li>«Aggiungi livello», scegli il servizio LIDAR e tocca «+» accanto alla griglia.</li>
+              <li>«Seleziona area», disegna un poligono attorno alla zona e aggiungi i dati al carrello.</li>
+              <li>Nel carrello scegli il DTM (non il DSM) e «Scarica tutto».</li>
+              <li>Ricevi uno ZIP: scompattalo e carica qui il file <code>.tif</code>. Va bene sia WGS84 (EPSG:4326) sia UTM.</li>
+            </ol>
+            <p class="hint">Licenza indicata: CC BY 4.0 (cita la fonte). Controlla la risoluzione nel catalogo: serve 1–2 m per tumuli e piccoli forti.</p>
+            <p><strong>TINITALY, INGV</strong>: tutta Italia a 10 m, GeoTIFF in UTM 32N. Adatto a provare, non a vedere strutture piccole. <a href="https://tinitaly.pi.ingv.it/Download_Area1_1.html" target="_blank" rel="noopener noreferrer">Pagina di scarico</a>. Licenza CC BY 4.0: cita Tarquini et al. (2023), TINITALY 1.1, INGV, doi:10.13127/tinitaly/1.1.</p>
+            <p class="hint">Se il file è molto grande, ritaglialo prima con QGIS («Ritaglia raster per estensione») e salvalo in GeoTIFF.</p>
+          </details>
           <label class="field">File del rilievo (.tif, .tiff, .asc)
             <input id="relFile" type="file" accept=".tif,.tiff,.asc,.txt,.grd,image/tiff">
           </label>

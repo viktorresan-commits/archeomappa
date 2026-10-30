@@ -74,11 +74,38 @@ def main(cartella):
     z10 = z.reshape(n // 5, 5, n // 5, 5).mean(axis=(1, 3)).astype("float32")
     z10[z10 < -1000] = -9999
     tifffile.imwrite(out / "dtm_10m.tif", z10, compression="zlib", tile=(128, 128), extratags=georef(ox, oy, 10.0, epsg), photometric="minisblack")
+    # versione in gradi (EPSG:4326), come i DTM del PST scaricati in WGS84: pixel quadrati in gradi,
+    # quindi circa 2,0 m da nord a sud e 1,5 m da est a ovest. Stesso terreno, ricampionato.
+    lat0, lon0 = 42.74, 12.16  # angolo nord-ovest
+    dlat = 3000.0 / 110574.0 / n
+    my, mx = dlat * 110574.0, dlat * 111320.0 * np.cos(np.radians(lat0))
+    cols = int(round(3000.0 / mx))
+    fy = (np.arange(n)[:, None] + 0.5) * my / cella - 0.5
+    fx = (np.arange(cols)[None, :] + 0.5) * mx / cella - 0.5
+    i0 = np.clip(np.floor(fy).astype(int), 0, n - 2); j0 = np.clip(np.floor(fx).astype(int), 0, n - 2)
+    ty, tx = np.clip(fy - i0, 0, 1), np.clip(fx - j0, 0, 1)
+    quattro = [z[i0, j0], z[i0, j0 + 1], z[i0 + 1, j0], z[i0 + 1, j0 + 1]]
+    zg = (quattro[0] * (1 - tx) * (1 - ty) + quattro[1] * tx * (1 - ty) + quattro[2] * (1 - tx) * ty + quattro[3] * tx * ty).astype("float32")
+    zg[np.min(quattro, axis=0) < -9000] = -9999
+    tags_geo = [
+        (33550, "d", 3, (dlat, dlat, 0.0), True),
+        (33922, "d", 6, (0.0, 0.0, 0.0, lon0, lat0, 0.0), True),
+        # modello geografico (1024=2), PixelIsArea, GeographicType=4326
+        (34735, "H", 16, (1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326), True),
+        (42113, "s", 0, "-9999", True),
+    ]
+    tifffile.imwrite(out / "dtm_4326.tif", zg, compression="zlib", tile=(256, 256), extratags=tags_geo, photometric="minisblack")
+    def a_gradi(x_m, y_m):  # metri dall'angolo nord-ovest -> (lat, lon)
+        return [lat0 - y_m / 110574.0, lon0 + x_m / (111320.0 * np.cos(np.radians(lat0)))]
+    Lm = n * cella
+    geo4326 = {"lat0": lat0, "lon0": lon0, "dlat": dlat, "colonne": cols, "righe": n,
+               "centro": a_gradi(Lm / 2, Lm / 2),
+               "strutture": {"recinto": a_gradi(Lm * 0.62, Lm * 0.35), "tumulo": a_gradi(Lm * 0.30, Lm * 0.30), "aggere": a_gradi(Lm * 0.12 + 235, Lm * 0.10 + 95)}}
     # posizioni vere delle strutture (UTM 32N) per i test
     L = n * cella
     pos = {"recinto": [ox + L * 0.62, oy - L * 0.35], "tumulo": [ox + L * 0.30, oy - L * 0.30], "aggere": [ox + L * 0.12 + 235, oy - (L * 0.10 + 95)]}
     import json
-    (out / "verita.json").write_text(json.dumps({"epsg": epsg, "cella": cella, "origine": [ox, oy], "strutture": pos}, indent=1))
+    (out / "verita.json").write_text(json.dumps({"epsg": epsg, "cella": cella, "origine": [ox, oy], "strutture": pos, "geo4326": geo4326}, indent=1))
     print("creati in", out)
 
 if __name__ == "__main__":

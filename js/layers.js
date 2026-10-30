@@ -89,7 +89,7 @@ export const SOVRAPPOSIZIONI = [
     ],
     opacita: 0.8,
     attr: "© MASE – Piano Straordinario di Telerilevamento Ambientale",
-    nota: "Copertura parziale e variabile da regione a regione.",
+    nota: "Servizio ministeriale: spesso non risponde dal browser. Per il LiDAR affidabile carica un file nella scheda Rilievo.",
     daVerificare: true,
   },
 ];

@@ -14,7 +14,7 @@ import {
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
 
-const VERSIONE = "0.2.0";
+const VERSIONE = "0.2.1";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -225,7 +225,9 @@ async function alternaSovr(r, casella) {
     casella.checked = false;
     r.on = false;
     r.stato = "non risponde";
-    toast(`«${r.def.nome}»: ${messaggioErrore(e)}. Se conosci il nome del livello, aggiungilo a mano da «Aggiungi un servizio WMS».`, 7000);
+    toast(r.def.id === "lidar"
+      ? `«${r.def.nome}»: ${messaggioErrore(e)}. Per usare il LiDAR carica un file (GeoTIFF) nella scheda Rilievo.`
+      : `«${r.def.nome}»: ${messaggioErrore(e)}. Se conosci il nome del livello, aggiungilo a mano da «Aggiungi un servizio WMS».`, 8000);
   } finally {
     casella.disabled = false;
     salvaSovr();

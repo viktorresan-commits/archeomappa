@@ -96,6 +96,24 @@ test("senza file aperto → errore chiaro", async () => {
   await assert.rejects(() => creaSessione().analizza({ ...C, raggioM: 500 }), /Nessun rilievo/);
 });
 
+test("GeoTIFF in gradi (EPSG:4326, come i DTM del PST): ricampionato e anomalie al posto giusto", async () => {
+  const { haversine } = await import("../js/geo.js");
+  const v = JSON.parse(readFileSync(join(cartella, "verita.json"), "utf8")).geo4326;
+  const s = creaSessione();
+  const info = await s.apri(aFile("dtm_4326.tif"));
+  assert.equal(info.epsg, 4326);
+  assert.ok(info.pixelM > 1.3 && info.pixelM < 1.7, `pixel ${info.pixelM}`);
+  const r = await s.analizza({ lat: v.centro[0], lon: v.centro[1], raggioM: 1450, vis: { tipo: "combinata" }, cercaAnomalie: true });
+  assert.ok(r.avvisi.some((a) => /ricampionato in UTM/.test(a)));
+  const vicino = (codice, nome, tol) => r.rilevamento.anomalie.some((a) => a.codice === codice && haversine(a.lat, a.lon, ...v.strutture[nome]) < tol);
+  assert.ok(vicino("recinto", "recinto", 25), "recinto non trovato");
+  assert.ok(vicino("circolare", "tumulo", 15), "tumulo non trovato");
+  assert.ok(r.rilevamento.anomalie.some((a) => a.codice === "lineare" && a.dimensioneM > 350 && a.geom.coord.some(([la, lo]) => haversine(la, lo, ...v.strutture.aggere) < 20)), "aggere non trovato");
+  assert.ok(r.rilevamento.anomalie.length <= 4, `troppi risultati: ${r.rilevamento.anomalie.length}`);
+  const [[s0, o0], [n0, e0]] = r.immagine.bounds;
+  assert.ok(s0 < v.centro[0] && n0 > v.centro[0] && o0 < v.centro[1] && e0 > v.centro[1]);
+});
+
 console.log("motore");
 const CREA_FALLISCE = () => { throw new Error("Worker non disponibile"); };
 test("senza Web Worker usa il thread principale e funziona", async () => {

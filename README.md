@@ -57,7 +57,7 @@ Un APK si ricava dall'app già pubblicata: vai su pwabuilder.com, inserisci l'in
 
 ## Aggiornare
 
-Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v2`, poi `am-v3`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.2.0) e, se aggiungi file, la lista `GUSCIO` di `sw.js`.
+Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v3`, poi `am-v4`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.2.1) e, se aggiungi file, la lista `GUSCIO` di `sw.js`.
 
 ## Provare la logica
 
@@ -66,7 +66,7 @@ npm test              # tutto
 npm run test:rapidi   # solo logica e visualizzazioni, senza Python
 ```
 
-Nessuna dipendenza npm (Node 18 o più recente). Le prove sul rilievo creano da sole file GeoTIFF e ASCII di prova con `tools/make_test_dem.py` (richiede Python con numpy, tifffile e Pillow; senza, quelle prove vengono saltate): un terreno finto con un recinto, un tumulo, un aggere e una collina naturale, in più formati di compressione. Coprono:
+Nessuna dipendenza npm (Node 18 o più recente). Le prove sul rilievo creano da sole file GeoTIFF e ASCII di prova con `tools/make_test_dem.py` (richiede Python con numpy, tifffile e Pillow; senza, quelle prove vengono saltate): un terreno finto con un recinto, un tumulo, un aggere e una collina naturale, in più formati di compressione e anche in gradi (EPSG:4326, come i DTM del PST scaricati in WGS84). Coprono:
 
 - `tests/test.mjs`: geometria, triangolazione, zone, epoche, lettura di Overpass (anche edifici e strade) e di GetCapabilities, CSV, filtro degli indirizzi;
 - `tests/test-raster.mjs`: lettore GeoTIFF/ASCII confrontato valore per valore con un riferimento;
@@ -107,6 +107,7 @@ La mappa usa Leaflet 1.9.4 caricato da unpkg; il service worker lo conserva in c
 - **Dati**: i siti noti vengono da OpenStreetMap, che è volontario e incompleto. Non sostituisce il Catalogo Generale dei Beni Culturali né i vincoli ufficiali.
 - **Epoche**: stimate dalle parole del testo (nome, descrizione, tag). Sono un indizio, non una datazione.
 - **Soglie delle zone**: i valori predefiniti (0,25 e 0,55, distanza minima 700 m) sono un punto di partenza. Con dati molto densi quasi tutto risulta «alto»: vanno tarati con l'ufficio su aree già studiate.
+- **LiDAR dai servizi WMS del Ministero**: il livello «LiDAR PST-A» non ha risposto da un telefono vero (come gli altri servizi del Geoportale Nazionale). Gli indirizzi pubblicati dal Ministero risultano `http`, che una pagina `https` non può usare, e il nome dei livelli non si può leggere dal browser (CORS). Non sono riuscito a contattare quei servizi dall'ambiente di sviluppo, quindi non so dire se siano spenti o solo non utilizzabili dal browser. Il LiDAR si usa in modo affidabile caricando un file nella scheda Rilievo (guida «Dove trovo un file LiDAR?»).
 - **Servizi WMS istituzionali**: gli indirizzi sono quelli pubblicati dai rispettivi enti al momento della scrittura, ma non ho potuto contattarli. Il nome del livello viene letto dal servizio e potrebbe non essere leggibile dal browser (CORS). In quel caso si inserisce a mano. I servizi `http` (come SITAP) non funzionano su una pagina https.
 - **Rilevatore non tarato su dati reali**: è stato provato solo su un terreno finto. Le soglie predefinite sono un punto di partenza ragionevole, non un risultato di taratura: su LiDAR vero vanno verificate e regolate confrontando con strutture note. Boschi, cave, argini, muri a secco, campi lavorati e rilievi naturali possono dare falsi positivi; strutture molto degradate o più piccole del pixel sfuggono. Il rilevatore dà ipotesi da verificare con ortofoto, fonti e sopralluogo autorizzato, non scoperte.
 - **Pixel da 10 m (TINITALY)**: si vedono solo forme grandi, e sul terreno finto il risultato cambiava con il raggio di analisi (la soglia automatica dipende dall'area). Per tumuli, fossati e piccoli forti servono dati a 1–2 m.
