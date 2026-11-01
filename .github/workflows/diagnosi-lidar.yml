@@ -77,26 +77,26 @@ jobs:
               st, tipo, corpo, dt = get(getmap(bb, px))
               print(f"GetMap {px} px: HTTP {st} {dt:.1f}s {len(corpo)} B → {descrivi(corpo, tipo)}")
               if "image" in tipo: imgs[px] = Image.open(io.BytesIO(corpo)).convert("RGBA")
-          print("--- GetFeatureInfo e legame grigio ↔ quota (come calibra() dell'app)")
+          print("--- immagini (base64, per guardarle) e letture di quota punto per punto")
+          import base64
           for px in (256, 512):
-              im = imgs[px]; w, h = im.size; g = im.convert("L").load(); a = im.getchannel("A").load()
-              celle = sorted(((g[c, r], c, r) for r in range(2, h-2, 7) for c in range(2, w-2, 7) if a[c, r] > 200))
-              scelte = [celle[int(i*(len(celle)-1)/8)] for i in range(9)]
-              cp = []
-              for (gv, c, r) in scelte:
+              st, tipo, corpo, dt = get(getmap(bb, px))
+              if px == 256:
+                  print("PNG256-INIZIO"); print(base64.b64encode(corpo).decode()); print("PNG256-FINE")
+              im = Image.open(io.BytesIO(corpo)); print(f"{px} px: modo PNG {im.mode}")
+              im = im.convert("RGBA"); w, h = im.size; pix = im.load()
+              grigio = sum(1 for r in range(0, h, 4) for c in range(0, w, 4) if pix[c, r][0] == pix[c, r][1] == pix[c, r][2]) / ((h//4)*(w//4))
+              colori = len(set(pix[c, r][:3] for r in range(0, h, 2) for c in range(0, w, 2)))
+              print(f"   pixel con R=G=B: {grigio:.0%}; colori distinti: {colori}")
+              righe = []
+              for i in range(12):
+                  c = int((i+0.5)*w/12); r = h//2
                   x = bb[0] + (c+0.5)*(bb[2]-bb[0])/w; y = bb[3] - (r+0.5)*(bb[3]-bb[1])/h
-                  st, tipo, corpo, dt = get(quota(x, y), 60)
-                  testo = re.sub(r"\s+", " ", corpo.decode("utf8", "replace")).strip()
-                  m = re.search(r"Stretched value;Pixel Value;\s*(-?[\d.]+);(-?[\d.]+);", testo)
-                  if m: cp.append((gv, float(m.group(2))))
-                  if len(cp) == 1 and m: print("   esempio di risposta:", testo[:200])
-              if len(cp) >= 5:
-                  n = len(cp); mx = sum(c[0] for c in cp)/n; my = sum(c[1] for c in cp)/n
-                  sxx = sum((c[0]-mx)**2 for c in cp); b = sum((c[0]-mx)*(c[1]-my) for c in cp)/sxx; a0 = my - b*mx
-                  ss = sum((c[1]-(a0+b*c[0]))**2 for c in cp); st_ = sum((c[1]-my)**2 for c in cp)
-                  print(f"{px} px: {n} punti, quota = {a0:.2f} + {b:.4f} × grigio, R² {1-ss/st_:.4f}  (grigi {cp[0][0]}..{cp[-1][0]})")
-              else:
-                  print(f"{px} px: solo {len(cp)} letture di quota valide su 9; ultima risposta: {testo[:200]}")
+                  st, tipo2, corpo2, dt2 = get(quota(x, y), 60)
+                  testo = re.sub(r"\s+", " ", corpo2.decode("utf8", "replace")).strip()
+                  m = re.search(r"@16 Stretched value;Pixel Value; (-?[\d.]+);(-?[\d.]+);", testo)
+                  righe.append(f"   c={c:4d} immagine RGB={pix[c, r][:3]} alfa={pix[c, r][3]}  servizio: grigio {m.group(1) if m else '?'} quota {m.group(2) if m else testo[:80]}")
+              print("\n".join(righe))
           print("--- 12 tessere con dati in parallelo (256 e 512 px)")
           bz, sz = tessera(lat, lon, 15)
           for px in (256, 512):
