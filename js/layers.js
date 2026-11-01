@@ -16,6 +16,7 @@ export const BASI = [
   {
     id: "topo",
     nome: "OpenTopoMap (rilievo)",
+    nota: "Carta con curve di livello e rilievo. Il server è di volontari e a volte risponde con una pagina di errore al posto della tessera (il 1° novembre 2026, dalle prove, ai zoom 13 e oltre in Italia centrale): se la mappa resta vuota usa «CyclOSM», «Stradale Esri» o «Carta topografica (Esri)» fra i livelli.",
     url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
     subdomains: "abc",
     maxZoom: 17,
@@ -105,15 +106,6 @@ export const BASI = [
     maxNativeZoom: 16,
     maxZoom: 19,
     attr: "© Esri, HERE, Garmin, OpenStreetMap contributors",
-  },
-  {
-    id: "esri-natgeo",
-    nome: "National Geographic (Esri)",
-    nota: "Carta di tipo atlante, con rilievo, boschi e toponimi: un'alternativa leggibile a OpenTopoMap. Dettaglio fino allo zoom 16, oltre è ingrandito.",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}",
-    maxNativeZoom: 16,
-    maxZoom: 19,
-    attr: "© National Geographic, Esri, Garmin, HERE, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA, increment P Corp.",
   },
 ];
 
