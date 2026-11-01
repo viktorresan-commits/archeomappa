@@ -594,7 +594,7 @@ function disegnaSovr() {
 
 // ------------------------------------------------- pulsanti sulla mappa
 
-const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite HD", "sat-esri": "Satellite Esri", cyclosm: "CyclOSM", hot: "Umanitaria", voyager: "Voyager", positron: "Positron", s2: "Sentinel-2", "esri-strade": "Stradale Esri", osmde: "OSM tedesca", dark: "Scura" };
+const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite HD", "sat-esri": "Satellite Esri", cyclosm: "CyclOSM", hot: "Umanitaria", s2: "Sentinel-2", "esri-strade": "Stradale Esri", osmde: "OSM tedesca", "esri-chiaro": "Grigio chiaro", "esri-scuro": "Grigio scuro", "esri-natgeo": "NatGeo" };
 
 /** Apre l'elenco delle mappe di base, perché con tante mappe scorrerle una alla volta non è comodo. */
 async function scegliBase() {

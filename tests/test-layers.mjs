@@ -198,18 +198,21 @@ test("ci sono dodici mappe di base, con id unici, indirizzo con {z}/{x}/{y} e no
     assert.match(b.url, /\{z\}/); assert.match(b.url, /\{x\}/); assert.match(b.url, /\{y\}/);
   }
 });
+test("CARTO non c'è più: dal 2026 le sue tessere gratuite rispondono «API key required»", () => {
+  for (const u of BASI.flatMap((b) => [b.url, b.urlRipiego]).filter(Boolean)) assert.doesNotMatch(u, /cartocdn|carto\.com/i, u);
+});
 test("nessun livello, di base o sovrapposto, chiede una chiave o un token (l'app non ne ha)", () => {
   const indirizzi = [...BASI.flatMap((b) => [b.url, b.urlRipiego]), ...SOVRAPPOSIZIONI.map((s) => s.url ?? s.modello)].filter(Boolean);
   for (const u of indirizzi) assert.doesNotMatch(u, /[?&](api_?key|key|token|access_token|apikey)=|stadiamaps|thunderforest|maptiler|mapbox\.com/i, u);
 });
-test("le nuove basi libere ci sono: CyclOSM, OSM Umanitaria, CARTO Voyager, Positron e scura, OSM tedesca, stradale Esri, Sentinel-2", () => {
+test("le nuove basi libere ci sono: CyclOSM, OSM Umanitaria, OSM tedesca, stradale Esri, grigio chiaro e scuro, NatGeo, Sentinel-2", () => {
   const per = (id) => BASI.find((b) => b.id === id);
-  for (const id of ["cyclosm", "hot", "voyager", "positron", "s2", "dark", "osmde", "esri-strade"]) assert.ok(per(id), id);
+  for (const id of ["cyclosm", "hot", "s2", "osmde", "esri-strade", "esri-chiaro", "esri-scuro", "esri-natgeo"]) assert.ok(per(id), id);
   assert.match(per("cyclosm").url, /tile-cyclosm\.openstreetmap\.fr\/cyclosm\//);
   assert.match(per("hot").url, /tile\.openstreetmap\.fr\/hot\//);
-  assert.match(per("voyager").url, /basemaps\.cartocdn\.com\/rastertiles\/voyager\//);
-  assert.match(per("positron").url, /basemaps\.cartocdn\.com\/light_all\//);
-  assert.match(per("dark").url, /basemaps\.cartocdn\.com\/dark_all\//);
+  assert.match(per("esri-chiaro").url, /Canvas\/World_Light_Gray_Base\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
+  assert.match(per("esri-scuro").url, /Canvas\/World_Dark_Gray_Base\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
+  assert.match(per("esri-natgeo").url, /NatGeo_World_Map\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
   assert.match(per("osmde").url, /tile\.openstreetmap\.de\//);
   assert.match(per("esri-strade").url, /World_Street_Map\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
   assert.match(per("s2").url, /tiles\.maps\.eox\.at\/wmts\/1\.0\.0\/s2cloudless-2024_3857\/default\/g\/\{z\}\/\{y\}\/\{x\}\.jpg$/);

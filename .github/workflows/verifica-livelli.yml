@@ -15,12 +15,25 @@ jobs:
           node-version: 22
       - name: Prove
         run: node scripts/verifica-livelli.mjs 2>&1 | tee uscita.txt
-      - name: Campioni (immagini sospette, in base64)
+      - name: Campioni di OpenTopoMap (tipo reale del contenuto)
         run: |
           H=(-H "User-Agent: Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile Safari/537.36" -H "Origin: https://viktorresan-commits.github.io" -H "Referer: https://viktorresan-commits.github.io/archeomappa/")
-          for u in "https://a.basemaps.cartocdn.com/rastertiles/voyager/14/8779/5999.png" "https://a.basemaps.cartocdn.com/dark_all/14/8779/5999.png" "https://a.tile.opentopomap.org/14/8779/5999.png"; do
-            echo "=== $u"
-            curl -sS -D - -o /tmp/t.bin "${H[@]}" "$u" | head -20
-            ls -l /tmp/t.bin; file /tmp/t.bin
-            base64 -w 0 /tmp/t.bin | head -c 30000; echo
+          for z in 12 13 14 15 16 17; do
+            for d in 0 1 2; do
+              for s in a b c; do
+                x=$(( (8779 >> (14 - z)) + d )); y=$(( 5999 >> (14 - z) ))
+                if [ $z -gt 14 ]; then x=$(( (8779 << (z - 14)) + d )); y=$(( 5999 << (z - 14) )); fi
+                u="https://$s.tile.opentopomap.org/$z/$x/$y.png"
+                curl -sS -o /tmp/t.bin -w "$s z$z $x/$y HTTP %{http_code} %{content_type} %{size_download} B %{time_total}s " "${H[@]}" "$u"; file -b /tmp/t.bin | cut -c1-40
+              done
+            done
+          done
+      - name: Nuove basi Esri
+        run: |
+          H=(-H "User-Agent: Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile Safari/537.36" -H "Origin: https://viktorresan-commits.github.io" -H "Referer: https://viktorresan-commits.github.io/archeomappa/")
+          for n in Canvas/World_Light_Gray_Base Canvas/World_Dark_Gray_Base NatGeo_World_Map; do
+            for z in 8 12 14 16 17; do
+              x=$(( z>=14 ? (8779 << (z-14)) : (8779 >> (14-z)) )); y=$(( z>=14 ? (5999 << (z-14)) : (5999 >> (14-z)) ))
+              curl -sS -o /tmp/t.bin -w "$n z$z $x/$y HTTP %{http_code} %{content_type} %{size_download} B CORS:%header{access-control-allow-origin} " "${H[@]}" "https://server.arcgisonline.com/ArcGIS/rest/services/$n/MapServer/tile/$z/$y/$x"; md5sum /tmp/t.bin | cut -c1-8
+            done
           done
