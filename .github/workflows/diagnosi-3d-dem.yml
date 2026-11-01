@@ -1,0 +1,69 @@
+# Prova a mano (Actions → «Diagnosi 3D quote» → Run workflow): esegue il vero modulo js/dem.js dell'app sulle risposte
+# vere di TINITALY e della tessera mondiale: georeferenziazione letta dal file, vuoti dopo il ritaglio, continuità fra
+# tessere vicine, scarto rispetto alla tessera mondiale. Non tocca l'app.
+name: Diagnosi 3D quote
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prove con il modulo dell'app
+        shell: bash
+        run: |
+          mkdir -p prova && cd prova && npm init -y >/dev/null && npm install pngjs --no-audit --no-fund 2>&1 | tail -1
+          cp ../js/dem.js ./dem.mjs
+          cat > prova.mjs <<'JS'
+          import { createRequire } from "node:module";
+          import { urlWcsTinitaly, urlTerrarium, leggiGeoTiff, bboxTessera, ricampionaSuTessera, componiTessera, decodificaTerrarium, quotaValida, SENZA_DATO, qualeFonte } from "./dem.mjs";
+          const require = createRequire(import.meta.url);
+          const { PNG } = require("pngjs");
+          const tessera = (lat, lon, z) => { const n = 2 ** z; return [Math.floor(((lon + 180) / 360) * n), Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)]; };
+          const scarica = async (u) => { const t0 = performance.now(); const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) Chrome/130", Origin: "https://viktorresan-commits.github.io" } }); const b = new Uint8Array(await r.arrayBuffer()); return { st: r.status, tipo: r.headers.get("content-type"), enc: r.headers.get("content-encoding"), b, ms: performance.now() - t0 }; };
+          const terr = async (z, x, y) => { const r = await scarica(urlTerrarium(z, x, y)); if (r.st !== 200) return null; const p = PNG.sync.read(Buffer.from(r.b)); return { q: decodificaTerrarium(p.data), lato: p.width }; };
+          const luoghi = [["Fabriano", 43.337, 12.905], ["Monte Catria", 43.474, 12.697], ["Ancona (mare)", 43.62, 13.50], ["Roma", 41.90, 12.50], ["Dolomiti", 46.50, 11.80], ["Sicilia interna", 37.50, 14.20], ["Cagliari", 39.22, 9.12]];
+          const z = 13;
+          const risultati = {};
+          for (const [nome, lat, lon] of luoghi) {
+            const [x, y] = tessera(lat, lon, z);
+            try {
+              const r = await scarica(urlWcsTinitaly(z, x, y));
+              const t = leggiGeoTiff(r.b);
+              const bb = bboxTessera(z, x, y);
+              const g = t.georef;
+              const est = { ovest: g.x0, est: g.x0 + g.dx * t.larghezza, nord: g.y0, sud: g.y0 + g.dy * t.altezza };
+              const risp = await terr(z, x, y);
+              const q = ricampionaSuTessera(t, bb, 384, 384);
+              const vuoti = q.filter((v) => !quotaValida(v)).length;
+              const vuotiFile = t.dati.filter((v) => !quotaValida(v)).length;
+              const c = componiTessera({ tiff: t, z, x, y, ripiego: risp?.q, ripiegoLato: risp?.lato ?? 0 });
+              let somma = 0, somma2 = 0, n = 0, massimo = 0;
+              if (risp) {
+                const rid = componiTessera({ tiff: null, z, x, y, ripiego: risp.q, ripiegoLato: risp.lato });
+                for (let i = 0; i < c.quote.length; i += 3) { const d = rid.quote[i] - c.quote[i]; somma += d; somma2 += d * d; n++; massimo = Math.max(massimo, Math.abs(d)); }
+              }
+              console.log(`${nome} z${z} ${x}/${y}: HTTP ${r.st} ${r.tipo} enc=${r.enc} ${r.ms.toFixed(0)} ms ${r.b.length} B | file ${t.larghezza}x${t.altezza}, passo ${g.dx.toFixed(2)} m, estende ${(((est.est - est.ovest) / (bb.est - bb.ovest) - 1) * 100).toFixed(1)} % oltre la richiesta, vuoti nel file ${(vuotiFile / t.dati.length * 100).toFixed(1)} % | dopo il ritaglio ${vuoti} vuoti (${(vuoti / q.length * 100).toFixed(2)} %) | composizione: fonte ${c.fonte}, da ripiego ${c.daRipiego}, da vicino ${c.daVicino} | Terrarium − TINITALY: media ${n ? (somma / n).toFixed(2) : "-"} m, scarto ${n ? Math.sqrt(somma2 / n - (somma / n) ** 2).toFixed(2) : "-"} m, massima ${massimo.toFixed(1)} m`);
+              risultati[nome] = { x, y, q: c.quote };
+            } catch (e) { console.log(`${nome}: ERRORE ${e.message}`); }
+          }
+          // continuità fra tessere vicine (stessa quota lungo il bordo comune)
+          const [x, y] = tessera(43.337, 12.905, z);
+          const comp = async (xx, yy) => { const r = await scarica(urlWcsTinitaly(z, xx, yy)); const t = leggiGeoTiff(r.b); return componiTessera({ tiff: t, z, x: xx, y: yy, ripiego: null, ripiegoLato: 0 }).quote; };
+          const A = await comp(x, y), B = await comp(x + 1, y), C = await comp(x, y + 1);
+          const W = 384; let dm = 0, dmax = 0;
+          for (let r = 0; r < W; r++) { const d = Math.abs(A[r * W + W - 1] - B[r * W]); dm += d; dmax = Math.max(dmax, d); }
+          console.log(`bordo A|B (affiancate a destra): differenza media ${(dm / W).toFixed(2)} m, massima ${dmax.toFixed(2)} m (salto fra pixel adiacenti sullo stesso terreno: ${(() => { let s = 0; for (let r = 0; r < W; r++) s += Math.abs(A[r * W + W - 1] - A[r * W + W - 2]); return (s / W).toFixed(2); })()} m di media)`);
+          dm = 0; dmax = 0;
+          for (let c = 0; c < W; c++) { const d = Math.abs(A[(W - 1) * W + c] - C[c]); dm += d; dmax = Math.max(dmax, d); }
+          console.log(`bordo A/C (sotto): differenza media ${(dm / W).toFixed(2)} m, massima ${dmax.toFixed(2)} m`);
+          console.log("fonti per z/x/y:", qualeFonte(13, x, y), qualeFonte(11, x >> 2, y >> 2));
+          console.log("fine");
+          JS
+          node prova.mjs
