@@ -238,7 +238,7 @@
             <input id="relOpacity" type="range" min="20" max="100" step="5" value="75">
           </label>
           <label class="check" id="relLevigaBox"><input id="relLeviga" type="checkbox" checked> Leviga i gradini del servizio (consigliato)</label>
-          <p class="hint">Il servizio manda il terreno in 256 grigi, cioè a gradini. Levigarli toglie le false curve di livello dalle ombre e resta sempre entro mezzo gradino dal dato del servizio. Non aggiunge dettagli che il servizio non ha.</p>
+          <p class="hint">Vale solo quando l'app riesce a convertire i grigi del servizio in metri: allora il terreno arriva a gradini (256 grigi) e levigarli toglie le false curve di livello dalle ombre, restando entro mezzo gradino dal dato. Se il servizio manda un'immagine già ombreggiata (come fa spesso il Geoportale) non c'è nulla da levigare. Non aggiunge dettagli che il servizio non ha.</p>
           <div class="row">
             <button id="btnRelShow" type="button" class="btn primary">Mostra il rilievo</button>
             <button id="btnRelFind" type="button" class="btn primary">Cerca anomalie</button>

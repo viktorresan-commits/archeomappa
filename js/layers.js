@@ -269,8 +269,7 @@ export const SOVRAPPOSIZIONI = [
     ],
     versione: "1.1.1",
     maxNativeZoom: 17,
-    risoluzione: 2, // tessere richieste al doppio dei pixel: a scala larga il servizio non «salta» i pixel e a schermo risulta più nitido
-    opacita: 0.8,
+    opacita: 0.8, // tessere da 256 px: a 512 il servizio non dà più dettaglio (il dato è a 1 m) e ogni tessera pesa il quadruplo
     rapido: true,
     etichettaRapida: "LiDAR",
     attr: "© MASE – Piano Straordinario di Telerilevamento Ambientale (CC BY 4.0)",

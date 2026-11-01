@@ -1,9 +1,12 @@
 // Ordine dei livelli sovrapposti: quale sta sopra e quale sotto. L'elenco va dall'alto (primo = sopra tutti)
 // al basso. Funzioni pure: l'app le usa per decidere la profondità (z-index) di ogni livello sulla mappa.
 
-/** Ordine di partenza, dall'alto al basso: linee e carte trasparenti sopra, immagini sotto. */
+/**
+ * Ordine di partenza, dall'alto al basso: linee (catasto) sopra, poi il dato più fine (il LiDAR, 1 m), poi le
+ * ombreggiature a scala larga (TINITALY 10 m, Esri 30 m: sopra il LiDAR lo velerebbero), poi le carte e le immagini.
+ */
 export const ORDINE_PREDEFINITO = [
-  "catasto", "ombre", "lidar", "igm25", "igm100", "ombre-esri", "topoesri", "ortofoto",
+  "catasto", "lidar", "ombre", "igm25", "igm100", "ombre-esri", "topoesri", "ortofoto",
   "wb2026", "wb2022", "wb2018", "wb2014",
 ];
 

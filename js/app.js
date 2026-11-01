@@ -20,7 +20,7 @@ import { ordineIniziale, spostaLivello, zIndexDi } from "./ordine.js";
 import { creaConfrontoLivelli } from "./tendina.js";
 import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
 
-const VERSIONE = "0.5.0";
+const VERSIONE = "0.5.1";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -189,8 +189,9 @@ SOVRAPPOSIZIONI.forEach(registraSovr);
 personalizzati.forEach(registraSovr);
 
 // ordine dei livelli: il primo dell'elenco sta sopra tutti gli altri sulla mappa (ricordato fra una sessione e l'altra)
-let ordineSovr = ordineIniziale([...sovr.keys()], mem.get("am.ordine", null));
-const salvaOrdine = () => mem.set("am.ordine", ordineSovr);
+// «am.ordine2»: l'ordine salvato dalla 0.5.0 («am.ordine») metteva «Ombre» sopra il LiDAR e viene lasciato da parte
+let ordineSovr = ordineIniziale([...sovr.keys()], mem.get("am.ordine2", null));
+const salvaOrdine = () => mem.set("am.ordine2", ordineSovr);
 function applicaOrdine() {
   for (const r of sovr.values()) r.layer?.setZIndex?.(zIndexDi(ordineSovr, r.def.id));
 }

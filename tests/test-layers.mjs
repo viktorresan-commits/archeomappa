@@ -145,11 +145,19 @@ test("la nota dell'IGM spiega che l'errore sugli indici è del server del Minist
   assert.equal(igm.famiglia, "CB.IGM25000");
   assert.match(igm.nota, /msShapefileOpen/);
 });
-test("il LiDAR sulla mappa chiede le tessere al doppio dei pixel (512 per una tessera da 256)", () => {
+test("il LiDAR sulla mappa chiede tessere di dimensione normale (256): 512 non aggiungeva dettaglio e pesava il quadruplo", () => {
   const wms = { wmsParams: { width: 256, height: 256 } };
   const L = { tileLayer: { wms: () => wms } };
   creaLivello(L, lidar, { url: "http://x.example/ogc?map=a", livelli: "EL.LIDAR.MARCHE.1x1.DTM" });
-  assert.equal(lidar.risoluzione, 2);
+  assert.equal(lidar.risoluzione, undefined);
+  assert.deepEqual([wms.wmsParams.width, wms.wmsParams.height], [256, 256]);
+});
+test("un livello con «risoluzione» 2 chiede le tessere al doppio dei pixel (le «Ombre» TINITALY, provate dal vero a 512)", () => {
+  const wms = { wmsParams: { width: 256, height: 256 } };
+  const L = { tileLayer: { wms: () => wms } };
+  const ombre = SOVRAPPOSIZIONI.find((o) => o.id === "ombre");
+  assert.equal(ombre.risoluzione, 2);
+  creaLivello(L, ombre, {});
   assert.deepEqual([wms.wmsParams.width, wms.wmsParams.height], [512, 512]);
 });
 test("un livello senza «risoluzione» resta alla dimensione normale", () => {

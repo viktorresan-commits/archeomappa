@@ -122,8 +122,9 @@ test("rilievo in metri: il gradino è un livello di grigio, ma solo se conta", (
   assert.equal(passoDaLevigare({ relativo: false, passoM: 0.02 }), 0);
   assert.equal(passoDaLevigare({ relativo: false, passoM: null }), 0);
 });
-test("rilievo in livelli di grigio relativi: il gradino è 1", () => {
-  assert.equal(passoDaLevigare({ relativo: true, passoM: null }), 1);
+test("livelli di grigio relativi: nulla da levigare (non si sa che cosa valga un livello; il servizio vero manda un rilievo già ombreggiato)", () => {
+  assert.equal(passoDaLevigare({ relativo: true, passoM: null }), 0);
+  assert.equal(passoDaLevigare({ relativo: true, passoM: 0.5 }), 0);
 });
 
 console.log(process.exitCode ? "\nPROVE FALLITE" : `\nTutte le prove della levigatura superate (${ok}).`);

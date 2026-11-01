@@ -47,10 +47,12 @@ export function dequantizza(pieno, valido, w, h, passo, { iterazioni = 6, sigma 
 }
 
 /**
- * Il gradino da levigare per un rilievo del servizio: un livello di grigio in metri se la conversione è riuscita,
- * altrimenti 1 (livelli di grigio relativi). Restituisce 0 se il gradino è troppo piccolo per contare.
+ * Il gradino da levigare per un rilievo del servizio: un livello di grigio in metri, ma solo se la conversione
+ * in metri è riuscita. Con i grigi relativi non si sa che cosa valga un livello (e il servizio del Geoportale
+ * manda di solito un rilievo già ombreggiato, non una scala di quote): niente da levigare, risponde 0.
+ * Risponde 0 anche se il gradino è troppo piccolo per contare.
  */
 export function passoDaLevigare({ relativo, passoM }) {
-  if (relativo) return 1;
+  if (relativo) return 0;
   return passoM >= PASSO_MIN_M ? passoM : 0;
 }

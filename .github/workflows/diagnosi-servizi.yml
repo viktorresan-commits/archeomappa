@@ -1,6 +1,7 @@
-# Prova a mano (Actions → «Diagnosi LiDAR» → Run workflow): interroga i servizi usati dall'app con le stesse
-# richieste dell'app e scrive stato, tipo di risposta e contenuto. Non tocca l'app.
-name: Diagnosi LiDAR
+# Prova a mano (Actions → «Diagnosi servizi» → Run workflow): interroga i servizi usati dall'app (LiDAR del Ministero,
+# TINITALY, mappe di base, IGM) con le stesse richieste dell'app e scrive stato, tipo di risposta e contenuto.
+# Non tocca l'app. Serve a distinguere un guasto dell'app da un guasto del server.
+name: Diagnosi servizi
 on:
   workflow_dispatch:
 permissions:
@@ -10,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Servizi nuovi della 0.5.0
+      - name: Richieste ai servizi
         shell: bash
         run: |
           pip install --quiet pillow 2>&1 | tail -1
@@ -46,6 +47,22 @@ jobs:
               st, tipo, corpo, dt = get(url)
               print(f"{nome}: HTTP {st}, {tipo.split(';')[0]}, {dt:.1f}s, {len(corpo)} B → {descrivi(corpo, tipo)}")
               return corpo
+          print("=== LiDAR del Ministero (Marche, DTM 1 m), zona con dati vicino a Fabriano")
+          L = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map"
+          LV = "EL.LIDAR.MARCHE.1x1.DTM"
+          cx = 12.90*M/180; cy = math.log(math.tan(math.pi/4+math.radians(43.40)/2))*M/math.pi
+          m = 600/math.cos(math.radians(43.40))
+          bl = (cx-m, cy-m, cx+m, cy+m)
+          for px in (256, 512, 1000):
+              prova(f"GetMap {px} px", f"{L}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS={LV}&STYLES=&SRS=EPSG:3857&BBOX={','.join('%.3f' % v for v in bl)}&WIDTH={px}&HEIGHT={px}&FORMAT=image/png&TRANSPARENT=true")
+          esiti = {}
+          for i in range(24):
+              x = cx + (i % 6 - 3)*60; y = cy + (i // 6 - 2)*60
+              b = ",".join("%.3f" % v for v in (x-1.5, y-1.5, x+1.5, y+1.5))
+              st, tipo, corpo, dt = get(f"{L}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS={LV}&QUERY_LAYERS={LV}&STYLES=&SRS=EPSG:3857&BBOX={b}&WIDTH=3&HEIGHT=3&X=1&Y=1&INFO_FORMAT=text/plain")
+              k = "quota letta" if re.search(rb"Stretched value;Pixel Value; -?[\d.]+;-?[\d.]+;", corpo) else f"HTTP {st} senza quota"
+              esiti[k] = esiti.get(k, 0) + 1
+          print("GetFeatureInfo (24 letture):", esiti)
           lat, lon = 43.337, 12.905
           print("=== Ombre: TINITALY (WMS GeoServer dell'INGV)")
           B = "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms"

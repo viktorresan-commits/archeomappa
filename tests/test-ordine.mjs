@@ -1,6 +1,7 @@
 // Ordine dei livelli sovrapposti (sopra/sotto). Esegui con: node tests/test-ordine.mjs
 import assert from "node:assert/strict";
 import { ORDINE_PREDEFINITO, ordineIniziale, spostaLivello, zIndexDi } from "../js/ordine.js";
+import { SOVRAPPOSIZIONI } from "../js/layers.js";
 
 let ok = 0;
 const test = (nome, fn) => {
@@ -26,6 +27,17 @@ test("il catasto, il LiDAR e l'IGM stanno sopra l'ortofoto e i satelliti storici
   const o = ordineIniziale(["wb2014", "ortofoto", "igm25", "lidar", "catasto"], null);
   for (const alto of ["catasto", "igm25", "lidar"]) assert.ok(o.indexOf(alto) < o.indexOf("ortofoto"), alto);
   assert.ok(o.indexOf("ortofoto") < o.indexOf("wb2014"));
+});
+
+test("il LiDAR (1 m) sta sopra le ombreggiature (10 m e più) che altrimenti lo velerebbero", () => {
+  const o = ordineIniziale(["ombre", "ombre-esri", "lidar", "igm25", "catasto", "ortofoto"], null);
+  assert.ok(o.indexOf("lidar") < o.indexOf("ombre"), "LiDAR sopra «Ombre» (TINITALY)");
+  assert.ok(o.indexOf("lidar") < o.indexOf("ombre-esri"), "LiDAR sopra l'ombreggiatura Esri");
+  assert.ok(o.indexOf("catasto") < o.indexOf("lidar"), "il catasto (linee) resta sopra tutto");
+  assert.ok(zIndexDi(o, "lidar") > zIndexDi(o, "ombre"), "e quindi ha la profondità maggiore");
+});
+test("ogni livello sovrapposto dell'app ha un posto nell'ordine predefinito (nessuno finisce per caso in coda)", () => {
+  for (const s of SOVRAPPOSIZIONI) assert.ok(ORDINE_PREDEFINITO.includes(s.id), `«${s.id}» manca in ORDINE_PREDEFINITO`);
 });
 
 console.log("spostamento");

@@ -12,7 +12,17 @@ import { rileva, impostazioniPredefinite } from "./detect.js";
 import { confrontaConFoto } from "./confronto.js";
 import { dequantizza, passoDaLevigare } from "./dettaglio.js";
 
-export const LATO_IMMAGINE_MAX = 3072; // pixel per lato dell'immagine mostrata sulla mappa (con il sovracampionamento ×2)
+export const LATO_IMMAGINE_MAX = 2400; // pixel per lato dell'immagine sulla mappa: come prima della 0.5 (5,8 milioni di pixel), per non appesantire i telefoni
+
+/** Esegue `pesante`; se lancia (di solito memoria insufficiente) segnala il fatto in `avvisi` e usa `semplice`. */
+export function provaOppureRipiego(pesante, semplice, avvisi, testo) {
+  try {
+    return pesante();
+  } catch (e) {
+    avvisi.push(`${testo} (${e?.message ?? e}).`);
+    return semplice();
+  }
+}
 
 export const VISUALIZZAZIONI = [
   { id: "multi", nome: "Ombreggiatura multidirezionale" },
@@ -118,12 +128,17 @@ export function creaSessione() {
       if (passo > 0) {
         avanzamento("Levigo i gradini del servizio…");
         await pausa();
-        const l = dequantizza(r.pieno, r.valido, g.w, g.h, passo);
-        pieno = l.dati;
-        out.avvisi.push(`Gradini del servizio levigati per la visualizzazione (un livello = ${meta.relativo ? "1 livello di grigio" : passo.toFixed(2).replace(".", ",") + " m"}): le quote restano entro mezzo gradino dal dato.`);
+        pieno = provaOppureRipiego(() => {
+          const l = dequantizza(r.pieno, r.valido, g.w, g.h, passo);
+          out.avvisi.push(`Gradini del servizio levigati per la visualizzazione (un livello = ${passo.toFixed(2).replace(".", ",")} m): le quote restano entro mezzo gradino dal dato.`);
+          return l.dati;
+        }, () => r.pieno, out.avvisi, "Levigatura dei gradini non eseguita: uso il dato com'è");
       }
       const rgba = calcolaImmagine(g, r.valido, pieno, p.vis ?? { tipo: "multi" }, impEff);
-      out.immagine = riproiettaPerMappa(rgba, g.w, g.h, g.cella, g.origine, g.proiezione, LATO_IMMAGINE_MAX, { sovracampione: 2 });
+      out.immagine = provaOppureRipiego(
+        () => riproiettaPerMappa(rgba, g.w, g.h, g.cella, g.origine, g.proiezione, LATO_IMMAGINE_MAX, { sovracampione: 2 }),
+        () => riproiettaPerMappa(rgba, g.w, g.h, g.cella, g.origine, g.proiezione, LATO_IMMAGINE_MAX, { sovracampione: 1 }),
+        out.avvisi, "Immagine a risoluzione doppia non riuscita: uso quella normale");
       const t2 = Date.now();
 
       if (p.cercaAnomalie) {

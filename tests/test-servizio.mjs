@@ -5,7 +5,7 @@ import {
   finestra, urlGetMap, urlQuota, leggiQuotaGfi, luminanza, unisciBlocchi, scegliPunti, regressione, calibra,
   scaricaFinestra, scaricaImmagine, scaricaTesto, ErroreServizio, metaDaPixel, statisticheGriglia,
 } from "../js/lidar-servizio.js";
-import { creaSessione } from "../js/analisi.js";
+import { creaSessione, provaOppureRipiego, LATO_IMMAGINE_MAX } from "../js/analisi.js";
 import { creaMotore } from "../js/motore.js";
 import { mercatoreDiretta } from "../js/proj.js";
 
@@ -348,10 +348,44 @@ test("l'immagine sulla mappa ha il doppio dei pixel del rilievo (entro il tetto)
   const s = creaSessione();
   await s.apriPixel(g);
   const r = await s.analizza({ lat: LAT, lon: LON, raggioM: 300, vis: { tipo: "ombre" } });
-  assert.ok(r.immagine.w >= r.griglia.w * 1.8 && r.immagine.w <= 3072, `${r.griglia.w} → ${r.immagine.w}`);
+  assert.ok(r.immagine.w >= r.griglia.w * 1.8 && r.immagine.w <= LATO_IMMAGINE_MAX, `${r.griglia.w} → ${r.immagine.w}`);
   let opachi = 0;
   for (let i = 3; i < r.immagine.rgba.length; i += 4) if (r.immagine.rgba[i] > 200) opachi++;
   assert.ok(opachi / (r.immagine.w * r.immagine.h) > 0.8, `${opachi / (r.immagine.w * r.immagine.h)}`);
+});
+test("l'immagine sulla mappa non supera 2400 pixel per lato nemmeno con aree grandi (memoria dei telefoni)", async () => {
+  assert.equal(LATO_IMMAGINE_MAX, 2400);
+  const sv = servizio({ modo: "fisso" });
+  const g = await scaricaFinestra({ base: BASE, livello: LIV, lat: LAT, lon: LON, raggioM: 1000, scarica: sv.scarica, leggiTesto: sv.leggiTesto, blocchi: [1000, 500, 256] });
+  const s = creaSessione();
+  await s.apriPixel(g);
+  const r = await s.analizza({ lat: LAT, lon: LON, raggioM: 1000, vis: { tipo: "ombre" } });
+  assert.ok(r.griglia.w >= 1900, `griglia ${r.griglia.w}`);
+  assert.ok(r.immagine.w <= 2400 && r.immagine.h <= 2400, `${r.immagine.w}×${r.immagine.h}`);
+  assert.ok(r.immagine.rgba.length <= 2400 * 2400 * 4);
+});
+test("dati relativi (grigi che non sono quote): nessuna levigatura, niente avviso sui gradini", async () => {
+  const sv = servizio();
+  const g = await scaricaFinestra({ base: BASE, livello: LIV, lat: LAT, lon: LON, raggioM: 300, scarica: sv.scarica, leggiTesto: async () => { throw new Error("rete"); } });
+  assert.equal(g.relativo, true);
+  const s = creaSessione();
+  await s.apriPixel(g);
+  const r = await s.analizza({ lat: LAT, lon: LON, raggioM: 300, vis: { tipo: "multi", esagerazione: 2 } });
+  assert.ok(!r.avvisi.some((a) => /levigati/.test(a)), r.avvisi.join(" | "));
+  assert.ok(r.immagine.w > 100);
+});
+test("provaOppureRipiego: se il calcolo pesante fallisce (memoria) usa quello semplice e lo dice", () => {
+  const avvisi = [];
+  const v = provaOppureRipiego(() => { throw new RangeError("Array buffer allocation failed"); }, () => "semplice", avvisi, "Calcolo pesante non riuscito");
+  assert.equal(v, "semplice");
+  assert.equal(avvisi.length, 1);
+  assert.match(avvisi[0], /Calcolo pesante non riuscito.*Array buffer allocation failed/);
+  const ok2 = [];
+  assert.equal(provaOppureRipiego(() => "pesante", () => "semplice", ok2, "x"), "pesante");
+  assert.deepEqual(ok2, []);
+});
+test("provaOppureRipiego: se fallisce anche quello semplice l'errore arriva all'utente", () => {
+  assert.throws(() => provaOppureRipiego(() => { throw new Error("a"); }, () => { throw new Error("b"); }, [], "x"), /b/);
 });
 test("metaDaPixel: la copertura è la finestra scaricata", async () => {
   const g = await griglia({ modo: "fisso" });
