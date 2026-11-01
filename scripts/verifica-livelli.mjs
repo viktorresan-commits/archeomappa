@@ -13,7 +13,7 @@ const ZOOM = [10, 14, 16, 18];
 async function scarica(url) {
   const t0 = Date.now();
   try {
-    const r = await fetch(url, { headers: { "User-Agent": UA, Origin: ORIGINE }, signal: AbortSignal.timeout(40000) });
+    const r = await fetch(url, { headers: { "User-Agent": UA, Origin: ORIGINE, Referer: ORIGINE + "/archeomappa/", Accept: "image/avif,image/webp,image/png,image/*,*/*;q=0.8" }, signal: AbortSignal.timeout(40000) });
     const b = Buffer.from(await r.arrayBuffer());
     return { st: r.status, tipo: (r.headers.get("content-type") ?? "").split(";")[0], cors: r.headers.get("access-control-allow-origin") ?? "—", b, ms: Date.now() - t0 };
   } catch (e) {
