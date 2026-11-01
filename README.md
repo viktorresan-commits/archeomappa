@@ -50,7 +50,7 @@ Il servizio non dà le quote ma un'immagine a 256 livelli di grigio (la stessa i
 
 **0.6.0: vista 3D.** Nuovo pulsante «3D» (vedi la sezione sopra). Il pulsante «Spegni tutto» resta in basso a *sinistra*, come richiesto il 30 ottobre.
 
-**0.7.0: tessere, mappe e gesto.** (1) Il 3D non ha più il pulsante: si apre con due dita che salgono insieme (sul computer Ctrl + trascinamento verso l'alto). (2) Le tessere in errore si ripetono da sole e i livelli del Ministero non chiedono più le tessere dei livelli di zoom intermedi; i messaggi d'errore dei server sono in italiano e dicono di chi è il guasto. (3) Il satellite principale è ora **Esri Clarity** (più nitido) con ripiego sull'Esri standard; oltre lo zoom 18 il dettaglio vero finisce e lo zoom 19 è solo l'immagine allargata. (4) LiDAR del Ministero (grigi) e rilievo a colori sono livelli distinti; si aggiungono SVF e pendenza. (5) Nuove mappe di base libere (stradale Esri, OpenStreetMap tedesca, CARTO scura, Sentinel-2 2024), sette anni di satellite storico con la data, ortofoto storiche, catasto toscano, carta Inghirami, catasto 1858 dell'Alto Adige, nomi dei luoghi e sentieri. (6) Tolta Europeana, che chiedeva una chiave.
+**0.7.0: tessere, mappe e gesto.** (1) Il 3D non ha più il pulsante: si apre con due dita che salgono insieme (sul computer Ctrl + trascinamento verso l'alto). (2) Le tessere in errore si ripetono da sole e i livelli del Ministero non chiedono più le tessere dei livelli di zoom intermedi; i messaggi d'errore dei server sono in italiano e dicono di chi è il guasto. (3) Il satellite principale è ora **Esri Clarity** (più nitido) con ripiego sull'Esri standard; oltre lo zoom 18 il dettaglio vero finisce e lo zoom 19 è solo l'immagine allargata. (4) LiDAR del Ministero (grigi) e rilievo a colori sono livelli distinti; si aggiungono SVF e pendenza. (5) Nuove mappe di base libere (stradale Esri, grigio chiaro e scuro Esri, National Geographic, OpenStreetMap tedesca, Sentinel-2 2024), sette anni di satellite storico con la data, ortofoto storiche, catasto toscano, carta Inghirami, catasto 1858 dell'Alto Adige, nomi dei luoghi e sentieri. (6) Tolta Europeana, che chiedeva una chiave, e tolte le mappe CARTO, che rispondono «API key required».
 
 In alternativa avanzata si può usare un file proprio (GeoTIFF o ASCII Grid), che resta sul dispositivo e non viene inviato a nessuno.
 
@@ -109,7 +109,7 @@ Per il solo involucro senza GitHub resta valida anche la strada pwabuilder.com, 
 
 ## Aggiornare
 
-Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v12`, poi `am-v13`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.7.0), la versione in `package.json` e `apk/package.json` e, se aggiungi file, la lista `GUSCIO` di `sw.js` (altrimenti l'app non parte senza rete).
+Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v13`, poi `am-v14`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.7.0), la versione in `package.json` e `apk/package.json` e, se aggiungi file, la lista `GUSCIO` di `sw.js` (altrimenti l'app non parte senza rete).
 
 ## Provare la logica
 
