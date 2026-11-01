@@ -1,0 +1,202 @@
+# Prova a mano (Actions → «Diagnosi 3D» → Run workflow): cerca da dove prendere le quote per la vista 3D.
+# Controlla se TINITALY (10 m) e il Ministero (LiDAR 1 m) danno quote vere (GeoTIFF/WCS) e non solo immagini,
+# se le tessere di quota aperte (Terrarium, Mapterhorn) rispondono e con quali intestazioni CORS, e di quanto
+# le fonti si discostano tra loro. Non tocca l'app.
+name: Diagnosi 3D
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fonti di quota
+        shell: bash
+        run: |
+          pip install --quiet pillow numpy tifffile imagecodecs 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import base64, io, math, re, time, traceback, urllib.request, urllib.error
+          import numpy as np
+          from PIL import Image
+          UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+          ORIGINE = "https://viktorresan-commits.github.io"
+          LAT, LON = 43.337, 12.905          # Fabriano
+          def get(url, t=90, intest=None):
+              t0 = time.time()
+              h = {"User-Agent": UA}
+              if intest: h.update(intest)
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=t)
+                  return r.status, dict((k.lower(), v) for k, v in r.headers.items()), r.read(), time.time()-t0
+              except urllib.error.HTTPError as e:
+                  return e.code, dict((k.lower(), v) for k, v in e.headers.items()), e.read(), time.time()-t0
+              except Exception as e:
+                  return 0, {}, str(e).encode(), time.time()-t0
+          def testo(corpo, n=300):
+              t = re.sub(r"<[^>]+>", " ", corpo.decode("utf8", "replace")); return re.sub(r"\s+", " ", t).strip()[:n]
+          def sezione(nome, f):
+              print(f"\n=== {nome}")
+              try: return f()
+              except Exception: print("ERRORE nella sezione:", traceback.format_exc()[-600:])
+          def tiff(corpo):
+              import tifffile
+              with tifffile.TiffFile(io.BytesIO(corpo)) as t:
+                  p = t.pages[0]; a = p.asarray()
+                  return a, p
+          def descr_array(a):
+              a = a.astype("float64")
+              return f"{a.shape} {a.dtype if False else ''} min {np.nanmin(a):.2f} max {np.nanmax(a):.2f} media {np.nanmean(a):.2f}, valori distinti {len(np.unique(a))}"
+          def prova_raster(nome, url, t=90):
+              st, h, corpo, dt = get(url, t)
+              tipo = h.get("content-type", "").split(";")[0]
+              riga = f"{nome}: HTTP {st}, {tipo}, {dt:.1f}s, {len(corpo)} B"
+              a = None
+              if st == 200 and ("tif" in tipo or corpo[:4] in (b"II*\x00", b"MM\x00*") or corpo[:4] in (b"II+\x00", b"MM\x00+")):
+                  try:
+                      a, p = tiff(corpo); riga += f" → TIFF {p.dtype} " + descr_array(a)
+                  except Exception as e: riga += f" → TIFF illeggibile ({e})"
+              elif st == 200 and "image" in tipo:
+                  try:
+                      im = Image.open(io.BytesIO(corpo)); a = np.array(im); riga += f" → immagine {im.mode} {im.size} dtype {a.dtype}, valori distinti {len(np.unique(a))}, min {a.min()} max {a.max()}"
+                  except Exception as e: riga += f" → immagine illeggibile ({e})"
+              else: riga += " → TESTO: " + testo(corpo)
+              print(riga); return st, h, corpo, a
+          # ---------- 1) TINITALY: capacità e formati
+          B = "https://tinitaly.pi.ingv.it/TINItaly_1_1"
+          def tin_wms_caps():
+              st, h, corpo, dt = get(B + "/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetCapabilities", 90)
+              t = corpo.decode("utf8", "replace")
+              print("WMS GetCapabilities:", st, f"{dt:.1f}s", len(corpo), "B; CORS:", h.get("access-control-allow-origin"))
+              g = re.search(r"<GetMap>(.*?)</GetMap>", t, re.S)
+              print("formati GetMap:", re.findall(r"<Format>([^<]+)</Format>", g.group(1)) if g else None)
+              print("livelli:", re.findall(r"<Name>([^<]+)</Name>", t)[:40])
+          sezione("TINITALY WMS: capacità", tin_wms_caps)
+          def tin_wcs_caps():
+              for ver in ("2.0.1", "1.1.1", "1.0.0"):
+                  st, h, corpo, dt = get(f"{B}/wcs?SERVICE=WCS&VERSION={ver}&REQUEST=GetCapabilities", 90)
+                  t = corpo.decode("utf8", "replace")
+                  ids = re.findall(r"<(?:wcs:)?CoverageId>([^<]+)<", t) or re.findall(r"<(?:wcs:)?Identifier>([^<]+)<", t) or re.findall(r"<(?:wcs:)?name>([^<]+)<", t)
+                  print(f"WCS {ver}: HTTP {st}, {dt:.1f}s, {len(corpo)} B, CORS {h.get('access-control-allow-origin')}, coperture {ids[:12]}" if st == 200 else f"WCS {ver}: HTTP {st} → {testo(corpo)}")
+          sezione("TINITALY WCS: capacità", tin_wcs_caps)
+          # ---------- 2) TINITALY: quote vere?
+          d = 0.01
+          box = (LON-d, LAT-d, LON+d, LAT+d)
+          tin_arr = {}
+          def tin_quote():
+              bb4326 = f"{box[1]},{box[0]},{box[3]},{box[2]}"   # lat,lon per WMS 1.3.0 / EPSG:4326
+              for fmt in ("image/geotiff", "image/geotiff8", "image/tiff", "image/png; mode=16bit", "image/png"):
+                  for lay in ("tinitaly_dem",):
+                      u = f"{B}/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={lay}&STYLES=&CRS=EPSG:4326&BBOX={bb4326}&WIDTH=256&HEIGHT=256&FORMAT={fmt.replace(' ', '%20')}"
+                      st, h, corpo, a = prova_raster(f"WMS {lay} {fmt}", u)
+                      if a is not None and fmt == "image/geotiff": tin_arr["wms"] = (a, corpo)
+              for cid in ("TINItaly_1_1__tinitaly_dem", "tinitaly_dem", "TINItaly_1_1:tinitaly_dem"):
+                  u = f"{B}/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId={cid}&format=image/tiff&subset=Lat({box[1]},{box[3]})&subset=Long({box[0]},{box[2]})"
+                  st, h, corpo, a = prova_raster(f"WCS 2.0.1 {cid}", u)
+                  if a is not None: tin_arr["wcs"] = (a, corpo); break
+              u = f"{B}/wcs?service=WCS&version=1.0.0&request=GetCoverage&coverage=TINItaly_1_1:tinitaly_dem&crs=EPSG:4326&bbox={box[0]},{box[1]},{box[2]},{box[3]}&width=256&height=256&format=GeoTIFF"
+              st, h, corpo, a = prova_raster("WCS 1.0.0 GeoTIFF", u)
+              if a is not None and "wcs" not in tin_arr: tin_arr["wcs"] = (a, corpo)
+          sezione("TINITALY: quote vere (GeoTIFF float?) vicino a Fabriano", tin_quote)
+          def tin_gfi():
+              u = f"{B}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=tinitaly_dem&QUERY_LAYERS=tinitaly_dem&STYLES=&SRS=EPSG:4326&BBOX={box[0]},{box[1]},{box[2]},{box[3]}&WIDTH=101&HEIGHT=101&X=50&Y=50&INFO_FORMAT=text/plain"
+              st, h, corpo, dt = get(u, 60); print("GetFeatureInfo al centro:", st, f"{dt:.1f}s", testo(corpo, 250))
+          sezione("TINITALY: quota in un punto (GetFeatureInfo)", tin_gfi)
+          # ---------- 3) Ministero: il LiDAR espone una quota vera?
+          P = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/"
+          def min_caps():
+              for nome, url in [
+                  ("WMS 1.3 caps", P + "WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetCapabilities"),
+                  ("WCS sulla stessa mappa", P + "WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WCS&VERSION=1.0.0&REQUEST=GetCapabilities"),
+                  ("WCS_v1.0.0/servizi-LiDAR", P + "WCS_v1.0.0/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WCS&VERSION=1.0.0&REQUEST=GetCapabilities"),
+                  ("WCS_v2.0.1 sulla stessa mappa", P + "WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map&SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCapabilities"),
+              ]:
+                  st, h, corpo, dt = get(url, 90)
+                  t = corpo.decode("utf8", "replace")
+                  extra = ""
+                  if "WMS" in nome and st == 200:
+                      g = re.search(r"<GetMap>(.*?)</GetMap>", t, re.S)
+                      extra = f" formati GetMap {re.findall(r'<Format>([^<]+)</Format>', g.group(1)) if g else None}; livelli {re.findall(r'<Name>([^<]+)</Name>', t)[:30]}"
+                  elif st == 200:
+                      extra = f" coperture {re.findall(r'<(?:wcs:)?(?:name|CoverageId|Identifier)>([^<]+)<', t)[:12]}"
+                  print(f"{nome}: HTTP {st}, {dt:.1f}s, {len(corpo)} B →{extra if st == 200 else ' ' + testo(corpo, 200)}")
+          sezione("Ministero: capacità WMS/WCS del LiDAR Marche", min_caps)
+          # ---------- 4) tessere di quota aperte
+          def tile(lat, lon, z):
+              n = 2**z; return int((lon+180)/360*n), int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
+          def decod_terrarium(a):
+              a = a.astype("float64"); return a[..., 0]*256 + a[..., 1] + a[..., 2]/256 - 32768
+          terr = {}
+          def aperte():
+              for z in (10, 12, 13, 14, 15):
+                  x, y = tile(LAT, LON, z)
+                  u = f"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+                  st, h, corpo, dt = get(u, 60, {"Origin": ORIGINE})
+                  riga = f"Terrarium z{z}: HTTP {st}, {dt:.1f}s, {len(corpo)} B, CORS {h.get('access-control-allow-origin')}"
+                  if st == 200:
+                      im = Image.open(io.BytesIO(corpo)).convert("RGB"); e = decod_terrarium(np.array(im)); terr[z] = (x, y, e)
+                      riga += f" → {im.size} quote {e.min():.0f}..{e.max():.0f} m, valori distinti {len(np.unique(e))}"
+                  print(riga)
+              for z in (10, 12, 14):
+                  x, y = tile(LAT, LON, z)
+                  for est in ("webp", "png"):
+                      u = f"https://tiles.mapterhorn.com/{z}/{x}/{y}.{est}"
+                      st, h, corpo, dt = get(u, 60, {"Origin": ORIGINE})
+                      riga = f"Mapterhorn z{z}.{est}: HTTP {st}, {dt:.1f}s, {len(corpo)} B, CORS {h.get('access-control-allow-origin')}"
+                      if st == 200:
+                          try:
+                              im = Image.open(io.BytesIO(corpo)).convert("RGB"); e = decod_terrarium(np.array(im)); terr[f"m{z}"] = (x, y, e)
+                              riga += f" → {im.size} quote {e.min():.0f}..{e.max():.0f} m, valori distinti {len(np.unique(e))}"
+                          except Exception as ex: riga += f" → illeggibile ({ex})"
+                      else: riga += " → " + testo(corpo, 120)
+                      print(riga)
+                      if st == 200: break
+              st, h, corpo, dt = get("https://tiles.mapterhorn.com/tilejson.json", 60)
+              print("Mapterhorn tilejson:", st, testo(corpo, 400))
+          sezione("Tessere di quota aperte (Terrarium, Mapterhorn) vicino a Fabriano", aperte)
+          # ---------- 5) confronto delle fonti sugli stessi punti
+          def confronto():
+              if "wms" not in tin_arr and "wcs" not in tin_arr:
+                  print("nessun GeoTIFF TINITALY leggibile: confronto saltato"); return
+              chiave = "wcs" if "wcs" in tin_arr else "wms"
+              a, _ = tin_arr[chiave]
+              a = np.array(a, dtype="float64")
+              if a.ndim == 3: a = a[..., 0]
+              H, W = a.shape
+              print(f"TINITALY ({chiave}): {W}x{H}, {(box[2]-box[0])/W*111320*math.cos(math.radians(LAT)):.1f} m/px E-W, quote {np.nanmin(a):.1f}..{np.nanmax(a):.1f}")
+              for z in sorted(k for k in terr if isinstance(k, int)):
+                  x, y, e = terr[z]; n = 2**z
+                  diffs = []
+                  for r in range(8, H-8, 6):
+                      for c in range(8, W-8, 6):
+                          lon = box[0] + (c+0.5)/W*(box[2]-box[0]); lat = box[3] - (r+0.5)/H*(box[3]-box[1])
+                          fx = ((lon+180)/360*n - x)*256; fy = ((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n - y)*256
+                          if 0 <= fx < 255 and 0 <= fy < 255:
+                              ix, iy = int(fx), int(fy); v = e[iy, ix]
+                              if np.isfinite(a[r, c]) and a[r, c] > -1000: diffs.append(v - a[r, c])
+                  if diffs:
+                      d_ = np.array(diffs); print(f"Terrarium z{z} − TINITALY: {len(d_)} punti, differenza media {d_.mean():+.2f} m, scarto {d_.std():.2f} m, massima {np.abs(d_).max():.1f} m")
+          sezione("Confronto delle quote fra le fonti (stessi punti)", confronto)
+          # ---------- 6) intestazioni CORS delle immagini da stendere sul 3D
+          def cors():
+              x, y = tile(LAT, LON, 12)
+              for nome, url in [
+                  ("Esri World_Imagery", f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/12/{y}/{x}"),
+                  ("OpenStreetMap", f"https://tile.openstreetmap.org/12/{x}/{y}.png"),
+                  ("OpenTopoMap", f"https://a.tile.opentopomap.org/12/{x}/{y}.png"),
+                  ("EOX Sentinel-2", f"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/12/{y}/{x}.jpg"),
+                  ("TINITALY WMS", f"{B}/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=tinitaly_hshd&STYLES=&FORMAT=image/png&SRS=EPSG:4326&WIDTH=64&HEIGHT=64&BBOX={box[0]},{box[1]},{box[2]},{box[3]}"),
+                  ("Esri Hillshade", f"https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/12/{y}/{x}"),
+              ]:
+                  st, h, corpo, dt = get(url, 60, {"Origin": ORIGINE})
+                  print(f"{nome}: HTTP {st}, CORS {h.get('access-control-allow-origin')}, tipo {h.get('content-type','').split(';')[0]}")
+          sezione("CORS delle immagini (serve per stenderle sul rilievo in WebGL)", cors)
+          # ---------- 7) un campione da riportare in sandbox per le prove
+          for k, (a, corpo) in tin_arr.items():
+              if len(corpo) < 400000:
+                  print(f"\nCAMPIONE TINITALY {k} ({len(corpo)} B), base64:")
+                  print("BEGIN_" + k.upper()); print(base64.b64encode(corpo).decode()); print("END_" + k.upper())
+          print("\nfine")
+          PY
+          python3 prova.py
