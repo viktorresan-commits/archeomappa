@@ -53,13 +53,21 @@ jobs:
               sat = [s for (h, s, v), al in zip(hsv.getdata(), a.getdata()) if al > 8]
               ms = (sum(sat) / len(sat)) if sat else 0
               return im.size, frac, ms
+          def piccola(b):
+              im = Image.open(io.BytesIO(b)).convert("RGBA")
+              fondo = Image.new("RGBA", im.size, (200, 60, 200, 255)); fondo.alpha_composite(im)
+              out = io.BytesIO(); fondo.convert("RGB").save(out, "JPEG", quality=55); return out.getvalue()
+          def stampa_img(nome, b):
+              try: r = piccola(b)
+              except Exception: r = b
+              print("IMG %s %d %s" % (nome, len(r), base64.b64encode(r).decode()), flush=True)
           def prova_tessera(etichetta, url, salva=False):
               st, h, b, s = get(url)
               if st == 200 and h.get("content-type", "").startswith("image/"):
                   try:
                       dim, frac, ms = analisi(b)
                       print("   %-52s %dx%d %6d byte, con dati %3d%%, saturazione media %3d/255 (%s), %.1f s" % (etichetta, dim[0], dim[1], len(b), round(100 * frac), ms, "COLORI" if ms > 40 else "grigi", s), flush=True)
-                      if salva and frac > 0.02: print("IMG %s %d %s" % (etichetta.replace(" ", "_"), len(b), base64.b64encode(b).decode()), flush=True)
+                      if salva and frac > 0.02: stampa_img(etichetta.replace(" ", "_"), b)
                   except Exception as e:
                       print("   %-52s immagine illeggibile: %s" % (etichetta, e))
               else:
@@ -83,38 +91,50 @@ jobs:
                           print("   livello %-34s %s | stili %s | scala %s | %s" % (nome.group(1), titolo.group(1) if titolo else "", stili or "—", scala or "—", re.sub(r"\s+", " ", bb.group(0))[:160] if bb else "—"))
                       break
           sezione("1) GetCapabilities dei servizi LiDAR", capab)
-          LUOGHI = {"MARCHE": [("Fabriano", 43.337, 12.905), ("Ancona", 43.617, 13.517), ("Urbino", 43.726, 12.636), ("Macerata", 43.300, 13.453), ("Pesaro", 43.910, 12.913), ("Ascoli", 42.854, 13.575)],
-                    "UMBRIA": [("Perugia", 43.110, 12.389), ("Gubbio", 43.351, 12.578), ("Assisi", 43.071, 12.616), ("Terni", 42.563, 12.645), ("Spoleto", 42.735, 12.738)]}
-          LIV = {"MARCHE": ["EL.LIDAR.MARCHE.1x1.DTM", "EL.LIDAR.MARCHE.1x1.DSM_LAST", "EL.LIDAR.MARCHE.2x2.DTM"],
-                 "UMBRIA": ["EL.LIDAR.UMBRIA.1x1.DTM", "EL.LIDAR.UMBRIA.1x1.T1.DSM_FIRST"]}
-          MAPPE = {"MARCHE": "LIDAR_MARCHE.map", "UMBRIA": "LIDAR_UMBRIA_2.map"}
+          def elenco_livelli(url):
+              st, h, b, _ = get(url + "&SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.1.1")
+              return re.findall(r"<Name>([^<]+)</Name>", b.decode("utf8", "replace"))
           def getmap():
-              salvate = 0
-              for reg in ("MARCHE", "UMBRIA"):
-                  for liv in LIV[reg]:
-                      print("-- %s %s" % (reg, liv))
-                      for (nome, lat, lon) in LUOGHI[reg]:
-                          for z in (9, 11, 13, 15, 17):
-                              x, y = tile_di(lat, lon, z)
-                              salva = (salvate < 14 and z in (13, 17) and liv.endswith(("1x1.DTM",)) and nome in ("Fabriano", "Ancona", "Perugia", "Gubbio"))
-                              if salva: salvate += 1
-                              prova_tessera("%s %s z%d" % (liv.split(".")[-1] + "/" + liv.split(".")[2], nome, z), wms(PCN + MAPPE[reg], "1.1.1", liv, merc(z, x, y)), salva)
-          sezione("2) GetMap LiDAR: grigi o colori, con dati o vuoto, a vari ingrandimenti", getmap)
+              for reg, mappa, lat, lon in (("MARCHE", "LIDAR_MARCHE.map", 43.337, 12.905), ("UMBRIA", "LIDAR_UMBRIA_2.map", 43.110, 12.389)):
+                  base = PCN + mappa
+                  nomi = [n for n in elenco_livelli(base) if "LIDAR" in n.upper()]
+                  print("-- %s: tutti i nomi di livello nel servizio: %s" % (reg, ", ".join(nomi)))
+                  scelti = [n for n in nomi if re.search(r"1x1\.(DTM|DSM_LAST)$|\.(1x1|MARCHE|UMBRIA)$", n)][:6]
+                  for liv in scelti:
+                      for z in (13, 16):
+                          x, y = tile_di(lat, lon, z)
+                          prova_tessera("%s 1.1.1 3857 z%d" % (liv, z), wms(base, "1.1.1", liv, merc(z, x, y)), z == 16)
+                      x, y = tile_di(lat, lon, 15)
+                      bb = merc(15, x, y)
+                      prova_tessera("%s 1.3.0 3857 z15" % liv, wms(base, "1.3.0", liv, bb))
+                      prova_tessera("%s 1.1.1 512px z15" % liv, wms(base, "1.1.1", liv, bb, px=512))
+                      # gradi: stesso riquadro in EPSG:4326 (asse x = lon)
+                      def ing(xm, ym): return (xm / M * 180, math.degrees(2 * math.atan(math.exp(ym / M * math.pi)) - math.pi / 2))
+                      (lo0, la0), (lo1, la1) = ing(bb[0], bb[1]), ing(bb[2], bb[3])
+                      prova_tessera("%s 1.1.1 4326 z15" % liv, "%s&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=true&LAYERS=%s&STYLES=&SRS=EPSG:4326&WIDTH=256&HEIGHT=256&BBOX=%.6f,%.6f,%.6f,%.6f" % (base, liv, lo0, la0, lo1, la1))
+                  # il valore vero in un punto (come fa l'app per misurare i metri)
+                  for liv in scelti[:3]:
+                      cx = lon * M / 180; cy = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * M / math.pi
+                      u = "%s&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=%s&QUERY_LAYERS=%s&STYLES=&SRS=EPSG:3857&BBOX=%.3f,%.3f,%.3f,%.3f&WIDTH=3&HEIGHT=3&X=1&Y=1&INFO_FORMAT=text/plain" % (base, liv, liv, cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5)
+                      st, h, b, s = get(u)
+                      print("   GetFeatureInfo %-34s HTTP %d: %s" % (liv, st, testo(b, 160)))
+          sezione("2) LiDAR: nomi dei livelli, varianti di richiesta, valore in un punto", getmap)
           def tinitaly():
               base = "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms"
-              for liv in ("tinitaly_hshd", "tinitaly_dtm", "tinitaly_slope", "tinitaly_aspect"):
-                  for z in (10, 13, 15):
-                      x, y = tile_di(43.337, 12.905, z)
-                      prova_tessera("TINITALY %s z%d" % (liv, z), wms(base, "1.1.1", liv, merc(z, x, y)), z == 13 and liv in ("tinitaly_hshd", "tinitaly_dtm"))
               st, h, b, s = get(base + "?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.1.1")
               t = b.decode("utf8", "replace")
-              print("TINITALY capabilities HTTP %d" % st)
-              for n, ti in re.findall(r"<Layer[^>]*>\s*<Name>([^<]+)</Name>\s*<Title>([^<]*)</Title>", t): print("   livello %s — %s" % (n, ti))
+              print("TINITALY capabilities HTTP %d, %d byte" % (st, len(b)))
+              coppie = re.findall(r"<Name>([^<]+)</Name>\s*<Title>([^<]*)</Title>", t)
+              for n, ti in coppie: print("   livello %s — %s" % (n, ti))
+              for liv in [n for n, _ in coppie][:8]:
+                  x, y = tile_di(43.337, 12.905, 13)
+                  prova_tessera("TINITALY %s z13" % liv, wms(base, "1.1.1", liv, merc(13, x, y)), True)
           sezione("3) TINITALY: livelli disponibili e aspetto", tinitaly)
           def immagine(nome, url, z, lat, lon):
               x, y = tile_di(lat, lon, z)
               st, h, b, s = get(url(z, x, y))
-              print("IMG %s %d %s" % (nome, len(b), base64.b64encode(b).decode() if st == 200 and h.get("content-type", "").startswith("image/") else "ERR%s" % st), flush=True)
+              if st == 200 and h.get("content-type", "").startswith("image/"): stampa_img(nome, b)
+              else: print("IMG %s ERR%s %s" % (nome, st, testo(b, 120)), flush=True)
           def storici():
               C = "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore&"
               for liv, z in (("r_toscan_cst_fogli", 16), ("r_toscan_cst_fogli", 14), ("r_toscan_cst_inghirami", 13), ("r_toscan_cst_inghirami", 15), ("r_toscan_cst_riempimento_raster", 15), ("r_toscan_cst_quadri_unione", 13), ("r_toscan_castore2", 15), ("r_toscan_cst_sezioni_topo.5", 15)):

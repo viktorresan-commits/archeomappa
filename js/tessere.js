@@ -10,6 +10,21 @@ import { testoDaHtml } from "./testo.js";
 const daBase64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 const brevi = (testo) => testoDaHtml(testo, 220);
 
+/**
+ * Riscrive in italiano semplice i messaggi interni dei server MapServer del Ministero. Il testo del server resta
+ * la prova, ma dice poco a chi non conosce il programma: qui si dice di chi è il guasto.
+ */
+export function spiegaErroreServizio(testo) {
+  const t = String(testo ?? "");
+  if (/msShapefileOpen|TILEINDEX|\.shp\b/i.test(t)) {
+    return "il server del Ministero non riesce a leggere i propri file di indice (errore msShapefileOpen): è un guasto del servizio, non dell'app, e a volte rientra da solo";
+  }
+  if (/msDrawRasterLayerLow|\.vrt\b/i.test(t)) {
+    return "il server del Ministero non trova il file del mosaico delle immagini (errore del servizio, non dell'app)";
+  }
+  return t;
+}
+
 export const clienteNativo = (win = globalThis) => (win.Capacitor?.isNativePlatform?.() ? win.Capacitor.Plugins?.CapacitorHttp ?? null : null);
 
 /** Scarica una tessera con il client nativo. Restituisce {src, tipo, byte, stato}; se non è un'immagine, {errore}. */
@@ -26,40 +41,10 @@ export async function scaricaTessera(http, url) {
   if (!/^image\//i.test(tipo)) {
     let testo = "";
     try { testo = brevi(new TextDecoder().decode(daBase64(dati))); } catch { /* non è testo */ }
-    return { errore: `il servizio risponde con un messaggio invece che con un'immagine${testo ? `: «${testo}»` : ` (${tipo || "tipo sconosciuto"})`}`, stato: r.status, tipo };
+    const spiegato = spiegaErroreServizio(testo);
+    return { errore: `il servizio risponde con un messaggio invece che con un'immagine${testo ? `: ${spiegato === testo ? `«${testo}»` : `${spiegato} («${testo}»)`}` : ` (${tipo || "tipo sconosciuto"})`}`, stato: r.status, tipo };
   }
   return { src: `data:${tipo};base64,${dati}`, tipo, byte: Math.floor((dati.length * 3) / 4), stato: r.status };
-}
-
-/**
- * Se si è nell'app Android, fa riprovare con il client nativo ogni tessera che il WebView non carica.
- * `stato` è un oggetto del chiamante: vi si aggiornano ok, errori, nativo e messaggio.
- * Restituisce true se il ripiego è attivo.
- */
-export function aggiungiRipiegoNativo(layer, { win = globalThis, stato = {} } = {}) {
-  const http = clienteNativo(win);
-  if (!http?.get || typeof layer.createTile !== "function") return false;
-  const originale = layer.createTile.bind(layer);
-  layer.createTile = function (coords, fatto) {
-    let tentato = false;
-    const tile = originale(coords, (err, t) => {
-      if (!err) { stato.ok = (stato.ok ?? 0) + 1; return fatto(null, t); }
-      if (tentato) { stato.messaggio ||= "l'immagine ricevuta non è leggibile"; return fatto(err, t); }
-      tentato = true;
-      const url = this.getTileUrl(coords);
-      scaricaTessera(http, url).then((esito) => {
-        if (esito.src) {
-          stato.nativo = (stato.nativo ?? 0) + 1;
-          t.src = esito.src; // il «load» originale chiude il giro e segnala la tessera come caricata
-        } else {
-          stato.messaggio = esito.errore;
-          fatto(err, t);
-        }
-      });
-    });
-    return tile;
-  };
-  return true;
 }
 
 /** Vero se tutti i pixel sono (quasi) trasparenti: il servizio ha risposto ma non ha disegnato nulla. */
