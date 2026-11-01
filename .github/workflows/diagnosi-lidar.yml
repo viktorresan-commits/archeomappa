@@ -1,0 +1,57 @@
+# Prova a mano (Actions → «Diagnosi LiDAR» → Run workflow): interroga il servizio LiDAR del Ministero
+# con richieste da 256, 512 e 1000 pixel e scrive tempi, tipo di risposta e dimensioni. Non tocca l'app.
+name: Diagnosi LiDAR
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Richieste GetMap e GetFeatureInfo
+        shell: bash
+        run: |
+          set -u
+          BASE='http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map'
+          LIV='EL.LIDAR.MARCHE.1x1.DTM'
+          # tessera 3857 a zoom 15 attorno a 43,3 N 12,9 E; riquadro = una tessera, poi 2x2 tessere
+          python3 - <<'PY' > bbox.txt
+          import math
+          lat, lon, z = 43.3, 12.9, 15
+          n = 2**z
+          x = int((lon+180)/360*n); y = int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
+          M = 20037508.342789244; s = 2*M/n
+          for k in (1, 2):
+              x0 = -M + x*s; y1 = M - y*s
+              print(f"{x0} {y1-k*s} {x0+k*s} {y1}")
+          PY
+          read -r A0 B0 A1 B1 < <(sed -n 1p bbox.txt)
+          read -r C0 D0 C1 D1 < <(sed -n 2p bbox.txt)
+          echo "riquadro tessera: $A0,$B0,$A1,$B1"
+          prova() { # nome, larghezza, bbox
+            local nome="$1" px="$2" bbox="$3"
+            local url="$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=$LIV&STYLES=&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=$px&HEIGHT=$px&BBOX=$bbox"
+            curl -sS -m 90 -o "$nome.out" -w "$nome: HTTP %{http_code}, %{content_type}, %{size_download} byte, %{time_total} s\n" "$url" || echo "$nome: curl fallito ($?)"
+            head -c 200 "$nome.out" | tr -c '[:print:]\n' '.' | head -3
+          }
+          for px in 256 512 1000; do prova "tessera-$px" "$px" "$A0,$B0,$A1,$B1"; done
+          prova "quadrato-2x2-1000" 1000 "$C0,$D0,$C1,$D1"
+          echo "--- 12 tessere in parallelo, da 256 e da 512 pixel"
+          for px in 256 512; do
+            start=$(date +%s.%N)
+            for i in $(seq 1 12); do
+              dx=$(python3 -c "print($A1-($A0)) if False else print(($A1-($A0))*$i*0)")
+              ( curl -sS -m 90 -o "par-$px-$i.out" -w "%{http_code} %{size_download} %{time_total}\n" "$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=$LIV&STYLES=&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=$px&HEIGHT=$px&BBOX=$(python3 -c "
+          a0,b0,a1,b1=$A0,$B0,$A1,$B1
+          w=a1-a0
+          print(f'{a0+w*$i},{b0},{a1+w*$i},{b1}')")" > "par-$px-$i.log" 2>&1 ) &
+            done
+            wait
+            end=$(date +%s.%N)
+            echo "px=$px: totale $(echo "$end - $start" | bc) s"
+            cat par-$px-*.log | sort | uniq -c | head -15
+          done
+          echo "--- GetFeatureInfo"
+          curl -sS -m 60 "$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=$LIV&QUERY_LAYERS=$LIV&STYLES=&FORMAT=image/png&SRS=EPSG:3857&WIDTH=101&HEIGHT=101&BBOX=$A0,$B0,$A1,$B1&X=50&Y=50&INFO_FORMAT=text/plain" | head -20
