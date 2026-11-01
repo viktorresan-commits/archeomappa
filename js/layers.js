@@ -24,7 +24,7 @@ export const BASI = [
   {
     id: "sat",
     nome: "Satellite HD (Esri Clarity)",
-    nota: "Le immagini Esri nella versione «Clarity», più nitida. Dove una tessera manca usa l'immagine Esri standard. Oltre lo zoom 18 il dettaglio vero finisce: lo zoom 19 è solo l'immagine allargata.",
+    nota: "Le immagini Esri nella versione «Clarity», più nitida ma in molte zone meno recente di «Satellite Esri (classico)». Dove una tessera manca usa l'immagine Esri standard. Oltre lo zoom 18 il dettaglio vero finisce: lo zoom 19 è solo l'immagine allargata.",
     url: "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     urlRipiego: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     maxNativeZoom: 18, // Clarity non ha tessere oltre lo zoom 18 (risponde 404); l'Esri standard a 19 in campagna dà spesso un segnaposto grigio
@@ -322,7 +322,7 @@ export const SOVRAPPOSIZIONI = [
     maxZoom: 19,
     opacita: 1,
     attr: "Immagini © Esri, Maxar, Earthstar Geographics (Wayback)",
-    nota: `Rilascio Esri Wayback del ${data}: la data è quella del rilascio dell'archivio, non quella di ogni ripresa. Per vedere tracce nelle colture o nei campi, confronta anni diversi con «Confronta».`,
+    nota: `Rilascio Esri Wayback del ${data}: la data è quella del rilascio dell'archivio, non quella di ogni ripresa. Se due anni sembrano uguali, in quella zona non ci sono state nuove riprese fra i due rilasci. Per vedere tracce nelle colture o nei campi, confronta anni diversi con «Confronta».`,
   })),
   // Ortofoto storiche del Geoportale nazionale: stessi server, stesso meccanismo a due fusi dell'ortofoto 2012.
   ...[

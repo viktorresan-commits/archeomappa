@@ -15,3 +15,12 @@ jobs:
           node-version: 22
       - name: Prove
         run: node scripts/verifica-livelli.mjs 2>&1 | tee uscita.txt
+      - name: Campioni (immagini sospette, in base64)
+        run: |
+          H=(-H "User-Agent: Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile Safari/537.36" -H "Origin: https://viktorresan-commits.github.io" -H "Referer: https://viktorresan-commits.github.io/archeomappa/")
+          for u in "https://a.basemaps.cartocdn.com/rastertiles/voyager/14/8779/5999.png" "https://a.basemaps.cartocdn.com/dark_all/14/8779/5999.png" "https://a.tile.opentopomap.org/14/8779/5999.png"; do
+            echo "=== $u"
+            curl -sS -D - -o /tmp/t.bin "${H[@]}" "$u" | head -20
+            ls -l /tmp/t.bin; file /tmp/t.bin
+            base64 -w 0 /tmp/t.bin | head -c 30000; echo
+          done
