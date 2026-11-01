@@ -19,8 +19,9 @@ import { variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva } from 
 import { ordineIniziale, spostaLivello, zIndexDi } from "./ordine.js";
 import { creaConfrontoLivelli } from "./tendina.js";
 import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
+import { decidiSpegniTutto, ricordatiValidi } from "./interruttore.js";
 
-const VERSIONE = "0.5.1";
+const VERSIONE = "0.5.2";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -192,6 +193,10 @@ personalizzati.forEach(registraSovr);
 // «am.ordine2»: l'ordine salvato dalla 0.5.0 («am.ordine») metteva «Ombre» sopra il LiDAR e viene lasciato da parte
 let ordineSovr = ordineIniziale([...sovr.keys()], mem.get("am.ordine2", null));
 const salvaOrdine = () => mem.set("am.ordine2", ordineSovr);
+
+// «Spegni tutto» è un interruttore: i livelli che spegne si ricordano, per riaccenderli al tocco successivo
+let spentiDa = ricordatiValidi(mem.get("am.spenti", []), new Set(sovr.keys()));
+const salvaSpenti = () => mem.set("am.spenti", spentiDa);
 function applicaOrdine() {
   for (const r of sovr.values()) r.layer?.setZIndex?.(zIndexDi(ordineSovr, r.def.id));
 }
@@ -564,16 +569,34 @@ async function scegliBase() {
   if (id) cambiaBase(id);
 }
 
-/** Spegne tutti i livelli sovrapposti accesi (le mappe di base restano). */
-function spegniTutti() {
-  if (sessioneConfronto && !confrontoOccupato) fermaConfronto(); // il confronto usa dei livelli: finisce prima
-  for (const r of sovr.values()) {
-    if (!r.on) continue;
-    if (r.layer) map.removeLayer(r.layer);
-    r.on = false;
+/**
+ * Interruttore del tasto tondo: spegne tutti i livelli sovrapposti accesi (le mappe di base restano) e ne ricorda
+ * l'elenco; se non ce ne sono di accesi, riaccende quelli che aveva spento.
+ */
+async function alternaTutti() {
+  if (sessioneConfronto && !confrontoOccupato) await fermaConfronto(); // il confronto usa dei livelli: finisce prima
+  const accesi = [...sovr.values()].filter((r) => r.on);
+  const { azione, ids } = decidiSpegniTutto(accesi.map((r) => r.def.id), spentiDa);
+  if (azione === "spegni") {
+    for (const r of accesi) {
+      if (r.layer) map.removeLayer(r.layer);
+      r.on = false;
+    }
+    spentiDa = ids;
+    salvaSpenti();
+    salvaSovr();
+    disegnaSovr();
+    toast("Livelli spenti. Tocca di nuovo il tasto per riaccenderli.");
+  } else if (azione === "riaccendi") {
+    spentiDa = [];
+    salvaSpenti();
+    disegnaRapidi();
+    for (const id of ids) {
+      const r = sovr.get(id);
+      if (r && !r.on) await alternaSovr(r, true); // uno alla volta: il LiDAR può chiedere la zona
+    }
+    toast("Livelli riaccesi.");
   }
-  salvaSovr();
-  disegnaSovr();
 }
 
 /** Barra di pulsanti sopra la mappa: accende e spegne i livelli senza aprire il pannello Livelli. */
@@ -583,8 +606,12 @@ function disegnaRapidi() {
   const spegni = $("btnSpegni");
   if (spegni) {
     const accesi = [...sovr.values()].some((r) => r.on);
-    spegni.disabled = !accesi;
-    spegni.title = accesi ? "Spegni tutti i livelli sovrapposti" : "Nessun livello sovrapposto acceso";
+    const riaccende = !accesi && spentiDa.length > 0;
+    const testo = accesi ? "Spegni tutti i livelli sovrapposti" : riaccende ? "Riaccendi i livelli spenti" : "Nessun livello sovrapposto acceso";
+    spegni.disabled = !accesi && !riaccende;
+    spegni.classList.toggle("riaccendi", riaccende); // stessa icona, senza la barra che la taglia
+    spegni.title = testo;
+    spegni.setAttribute("aria-label", testo);
   }
   const z = map.getZoom();
   const rapidi = [...sovr.values()].filter((r) => r.def.rapido);
@@ -1588,7 +1615,7 @@ function avvia() {
   disegnaCategorie();
   iniziaWms();
   iniziaConfronto();
-  $("btnSpegni").addEventListener("click", spegniTutti);
+  $("btnSpegni").addEventListener("click", alternaTutti);
   iniziaImp();
   mostraImp();
   aggiornaRete();

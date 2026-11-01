@@ -249,4 +249,5 @@ ol.results { counter-reset: r; }
 }
 .fab:disabled { opacity: 0.45; cursor: default; }
 .fab.alto { bottom: 112px; }
+.fab.riaccendi .barra { display: none; } /* livelli spenti da riaccendere: l'icona dei livelli senza la barra */
 .cmpetichetta { flex: 1 1 160px; font-size: 0.85rem; font-weight: 600; }

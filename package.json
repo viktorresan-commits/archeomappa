@@ -1,11 +1,11 @@
 {
   "name": "archeomappa-italia",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "description": "Prototipo PWA: mappa del potenziale archeologico per l'Italia",
   "scripts": {
-    "test": "node tests/test.mjs && node tests/test-raster.mjs && node tests/test-visual.mjs && node tests/test-detect.mjs && node tests/test-analisi.mjs && node tests/test-layers.mjs && node tests/test-servizio.mjs && node tests/test-varianti.mjs && node tests/test-confronto.mjs && node tests/test-riferimenti.mjs && node tests/test-tendina.mjs && node tests/test-ordine.mjs && node tests/test-tocco-lungo.mjs && node tests/test-dettaglio.mjs",
-    "test:rapidi": "node tests/test.mjs && node tests/test-visual.mjs && node tests/test-layers.mjs && node tests/test-servizio.mjs && node tests/test-varianti.mjs && node tests/test-riferimenti.mjs && node tests/test-tendina.mjs && node tests/test-ordine.mjs && node tests/test-tocco-lungo.mjs && node tests/test-dettaglio.mjs"
+    "test": "node tests/test.mjs && node tests/test-raster.mjs && node tests/test-visual.mjs && node tests/test-detect.mjs && node tests/test-analisi.mjs && node tests/test-layers.mjs && node tests/test-servizio.mjs && node tests/test-varianti.mjs && node tests/test-confronto.mjs && node tests/test-riferimenti.mjs && node tests/test-tendina.mjs && node tests/test-ordine.mjs && node tests/test-interruttore.mjs && node tests/test-tocco-lungo.mjs && node tests/test-dettaglio.mjs",
+    "test:rapidi": "node tests/test.mjs && node tests/test-visual.mjs && node tests/test-layers.mjs && node tests/test-servizio.mjs && node tests/test-varianti.mjs && node tests/test-riferimenti.mjs && node tests/test-tendina.mjs && node tests/test-ordine.mjs && node tests/test-interruttore.mjs && node tests/test-tocco-lungo.mjs && node tests/test-dettaglio.mjs"
   }
 }
