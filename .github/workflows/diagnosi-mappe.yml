@@ -1,0 +1,158 @@
+# Prova a mano (Actions → «Diagnosi mappe» → Run workflow).
+# 1) mappe di base candidate: rispondono? con chiave? mandano il CORS? 2) satellite: fino a che ingrandimento c'è dettaglio vero
+#    attorno a Fabriano (Esri, Esri Clarity, Sentinel-2 EOX) e quali «rilasci» Wayback esistono con la loro data;
+# 3) servizi WMS storici (Catasto Leopoldino della Toscana, Catasto 1858 dell'Alto Adige, IGM e ortofoto storiche del Geoportale).
+name: Diagnosi mappe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prove
+        shell: bash
+        run: |
+          pip install --quiet pillow numpy 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import io, math, re, time, html, json, hashlib, traceback, urllib.request, urllib.error
+          from concurrent.futures import ThreadPoolExecutor
+          import numpy as np
+          from PIL import Image
+          UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+          ORIGINE = "https://viktorresan-commits.github.io"
+          LAT, LON = 43.360, 12.900
+          def get(url, t=45, origine=True):
+              t0 = time.time(); h = {"User-Agent": UA}
+              if origine: h["Origin"] = ORIGINE
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=t)
+                  return r.status, dict((k.lower(), v) for k, v in r.headers.items()), r.read(), time.time() - t0
+              except urllib.error.HTTPError as e:
+                  return e.code, dict((k.lower(), v) for k, v in e.headers.items()), e.read(), time.time() - t0
+              except Exception as e:
+                  return 0, {}, str(e).encode(), time.time() - t0
+          def testo(c, n=200):
+              t = html.unescape(re.sub(r"<[^>]+>", " ", c.decode("utf8", "replace"))); return re.sub(r"\s+", " ", t).strip()[:n]
+          def tile_di(lat, lon, z):
+              n = 2 ** z; return int((lon + 180) / 360 * n), int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n)
+          def sezione(nome, f):
+              print("\n=== " + nome, flush=True)
+              try: f()
+              except Exception: print("ERRORE nella sezione:", traceback.format_exc()[-800:])
+          def riempi(url, z, x, y):
+              return url.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y)).replace("{s}", "a").replace("{r}", "")
+          XYZ = [
+            ("Esri World Topo", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", 15),
+            ("Esri World Street", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", 15),
+            ("Esri National Geographic", "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}", 14),
+            ("Esri Terrain base", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}", 10),
+            ("Esri Clarity (satellite)", "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", 16),
+            ("Esri nomi dei luoghi (sovrapposto)", "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", 14),
+            ("Esri strade (sovrapposto)", "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", 14),
+            ("OSM Germania", "https://tile.openstreetmap.de/{z}/{x}/{y}.png", 15),
+            ("OSM Francia", "https://tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png", 15),
+            ("OSM Wikimedia", "https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png", 15),
+            ("ÖPNV Karte (trasporti)", "https://tileserver.memomaps.de/tilegen/{z}/{x}/{y}.png", 15),
+            ("Sentieri escursionistici (Waymarked Trails)", "https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png", 14),
+            ("Sentieri a cavallo/ciclo (Waymarked, ciclo)", "https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png", 14),
+            ("OpenRailwayMap", "https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", 14),
+            ("CARTO scura", "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png", 15),
+            ("CARTO Voyager senza nomi", "https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png", 15),
+            ("USGS Imagery (mondiale a bassa scala)", "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", 10),
+            ("Stadia/Stamen Terrain (serve chiave)", "https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.jpg", 12),
+            ("Thunderforest Outdoors (serve chiave)", "https://tile.thunderforest.com/outdoors/{z}/{x}/{y}.png", 12),
+            ("Mapbox satellite (serve chiave)", "https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg90", 12),
+            ("MapTiler (serve chiave)", "https://api.maptiler.com/maps/hybrid/256/{z}/{x}/{y}.jpg", 12),
+            ("OpenFreeMap (vettoriale: solo verifica)", "https://tiles.openfreemap.org/planet", 0),
+          ] + [("Sentinel-2 EOX %s" % a, "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-%s_3857/default/g/{z}/{y}/{x}.jpg" % a, 13) for a in (2019, 2020, 2021, 2022, 2023, 2024)] + [
+            ("Sentinel-2 EOX (senza anno, ultimo)", "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg", 13),
+            ("EOX Blue Marble/terrain-light", "https://tiles.maps.eox.at/wmts/1.0.0/terrain-light_3857/default/g/{z}/{y}/{x}.jpg", 9),
+            ("EOX OSM", "https://tiles.maps.eox.at/wmts/1.0.0/osm_3857/default/g/{z}/{y}/{x}.jpg", 12),
+          ]
+          def prova_xyz():
+              print("%-46s %-5s %-22s %8s %-14s %5s" % ("mappa", "stato", "tipo", "byte", "CORS", "sec"))
+              for nome, url, z in XYZ:
+                  x, y = tile_di(LAT, LON, z); st, h, b, s = get(riempi(url, z, x, y))
+                  print("%-46s %-5s %-22s %8d %-14s %5.2f %s" % (nome, st, h.get("content-type", "")[:22], len(b), h.get("access-control-allow-origin", "—")[:14], s, "" if st == 200 else testo(b, 90)))
+          sezione("1) mappe di base candidate (stato, tipo, byte, intestazione CORS)", prova_xyz)
+          def dettaglio(img):
+              g = np.asarray(img.convert("L"), dtype=np.float32)
+              return float(np.mean(np.abs(np.diff(g, axis=0))) + np.mean(np.abs(np.diff(g, axis=1)))) / 2
+          def carica(url, z, x, y):
+              st, h, b, s = get(riempi(url, z, x, y))
+              if st != 200 or not h.get("content-type", "").startswith("image/"): return None, st, b
+              return Image.open(io.BytesIO(b)).convert("RGB"), st, b
+          def nitidezza():
+              # a ogni ingrandimento: la tessera ha più dettaglio dell'ingrandimento precedente rimpicciolito-e-riallargato?
+              for nome, url in [("Esri World Imagery", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"),
+                                ("Esri Clarity", "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")]:
+                  for (lat, lon, luogo) in [(43.360, 12.900, "bosco di Fabriano"), (43.3395, 12.9055, "Fabriano città"), (43.110, 12.390, "Perugia")]:
+                      print("-- %s, %s" % (nome, luogo))
+                      for z in range(15, 21):
+                          x, y = tile_di(lat, lon, z); img, st, b = carica(url, z, x, y)
+                          if img is None: print("   z%d: stato %s %s" % (z, st, testo(b, 80))); continue
+                          # tessera a z-1 che la contiene, ingrandita 2x sul quadrante giusto
+                          pimg, pst, pb = carica(url, z - 1, x // 2, y // 2)
+                          nuova = dettaglio(img)
+                          if pimg is not None:
+                              qx, qy = (x % 2) * 128, (y % 2) * 128
+                              su = pimg.crop((qx, qy, qx + 128, qy + 128)).resize((256, 256), Image.BICUBIC)
+                              vecchia = dettaglio(su); rapporto = nuova / vecchia if vecchia else 0
+                          else: rapporto = 0; vecchia = 0
+                          print("   z%d: %6d byte, dettaglio %.2f contro %.2f dell'ingrandimento precedente allargato: rapporto %.2f -> %s md5 %s" % (z, len(b), nuova, vecchia, rapporto, "DETTAGLIO NUOVO" if rapporto > 1.25 else "solo allargata", hashlib.md5(b).hexdigest()[:8]))
+          sezione("2a) satellite: fino a quale ingrandimento c'è dettaglio vero", nitidezza)
+          def wayback():
+              st, h, b, s = get("https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json", origine=False)
+              print("waybackconfig:", st, len(b), "byte")
+              if st != 200: return
+              cfg = json.loads(b)
+              righe = sorted(((int(k), v.get("itemTitle", "")) for k, v in cfg.items()))
+              print("rilasci:", len(righe), "primo:", righe[0], "ultimo:", righe[-1])
+              for k, t in righe:
+                  if k in (10, 8255, 16245, 32246) or k == righe[-1][0]: print("   usato dall'app:", k, t)
+              ann = {}
+              for k, t in righe:
+                  m = re.search(r"(\d{4})-(\d\d)-(\d\d)", t)
+                  if m: ann.setdefault(m.group(1), (k, t))
+              print("primo rilascio di ogni anno:")
+              for a, (k, t) in sorted(ann.items()): print("   ", a, k, t)
+              # le tessere dei rilasci usati dall'app sono davvero diverse fra loro a Fabriano z17?
+              x, y = tile_di(43.3395, 12.9055, 17)
+              for k in (10, 8255, 16245, 32246):
+                  st, h, b, s = get("https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/%d/17/%d/%d" % (k, y, x))
+                  print("   rilascio %d: stato %s, %d byte, md5 %s, CORS %s" % (k, st, len(b), hashlib.md5(b).hexdigest()[:8], h.get("access-control-allow-origin", "—")))
+          sezione("2b) Esri Wayback: rilasci e date", wayback)
+          PCN = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/"
+          def livelli_wms(url, versione="1.3.0"):
+              sep = "&" if "?" in url else "?"
+              st, h, b, s = get(url + sep + "SERVICE=WMS&REQUEST=GetCapabilities&VERSION=" + versione, t=60, origine=False)
+              t = b.decode("utf8", "replace")
+              if st != 200 or "<WMS_Capabilities" not in t and "<WMT_MS_Capabilities" not in t: return st, None, testo(b, 160), h
+              nomi = re.findall(r"<Layer[^>]*>\s*<Name>([^<]+)</Name>\s*<Title>([^<]*)</Title>", t)
+              return st, nomi, "", h
+          def stampa_wms(nome, url, versione="1.3.0", max_=14):
+              st, nomi, err, h = livelli_wms(url, versione)
+              if nomi is None: print("%-52s -> %s %s" % (nome, st, err)); return None
+              print("%-52s -> OK, %d livelli, CORS %s" % (nome, len(nomi), h.get("access-control-allow-origin", "—")))
+              for n, t_ in nomi[:max_]: print("       %s — %s" % (n, t_[:90]))
+              return nomi
+          def wms_storici():
+              stampa_wms("Toscana CASTORE (catasto Leopoldino)", "http://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore&", "1.3.0")
+              stampa_wms("Toscana CASTORE (https)", "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore&", "1.3.0")
+              nomi = stampa_wms("Alto Adige geoservices5", "https://geoservices5.civis.bz.it/geoserver/ows", "1.3.0", max_=0)
+              if nomi:
+                  for n, t_ in nomi:
+                      if re.search(r"adastre|1858|Kataster", n + t_, re.I): print("       %s — %s" % (n, t_[:90]))
+          sezione("3a) WMS storici regionali", wms_storici)
+          def pcn():
+              nomi = ["IGM_25000", "IGM_50000", "IGM_100000", "IGM_250000", "IGM_500000", "IGM_1000000", "IGM_200000",
+                      "ortofoto_bn_88", "ortofoto_bn_94", "ortofoto_bn_97", "ortofoto_bn_00", "ortofoto_colore_00", "ortofoto_colore_06",
+                      "ortofoto_colore_10", "ortofoto_colore_12", "ortofoto_colore_15", "ortofoto_colore_18", "ortofoto_colore_19",
+                      "ortofoto_colore_20", "ortofoto_colore_21", "ortofoto_colore_22", "ortofoto_colore_23", "carta_storica", "catasto_storico", "volo_gai", "volo_base"]
+              for n in nomi: stampa_wms("PCN raster/%s.map" % n, PCN + "raster/%s.map" % n, max_=8)
+          sezione("3b) Geoportale nazionale: quali file di servizio esistono", pcn)
+          PY
+          python3 prova.py 2>&1 | tee uscita.txt
