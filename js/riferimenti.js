@@ -101,7 +101,7 @@ export const ELENCO_RIFERIMENTI = [
  */
 export function fonteRiferimento(id, { wms = null } = {}) {
   if (id === "sat") {
-    const b = BASI.find((x) => x.id === "sat");
+    const b = BASI.find((x) => x.id === "sat-esri"); // l'immagine Esri classica: quella a cui si riferiscono i rilasci storici
     // Esri a zoom 19 in campagna restituisce spesso un'immagine grigia «dati non disponibili»: meglio fermarsi a 18
     return { id, nome: "Satellite attuale (Esri)", modello: b.url, tilePx: 256, zMax: 18, zt: (z) => z };
   }

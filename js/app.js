@@ -24,7 +24,7 @@ import { decidiSpegniTutto, ricordatiValidi } from "./interruttore.js";
 import { base3dDa2d, zoomLeaflet as zoomDa3d } from "./stile3d.js";
 import { collegaGestoInclina, inclinazioneIniziale } from "./gesto-inclina.js";
 
-const VERSIONE = "0.6.0";
+const VERSIONE = "0.7.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -227,12 +227,20 @@ function elencoRegioni(d) {
   ];
 }
 
+/** Che cosa usare nel frattempo quando un livello del Ministero non risponde. */
+function alternativaA(r) {
+  if (r.def.id === "lidar") return " Intanto c'è il «Rilievo a colori» (TINITALY), che copre tutta l'Italia.";
+  if (r.def.famiglia && /orto/i.test(r.def.id)) return " Intanto puoi usare il «Satellite HD» o i satelliti storici Esri.";
+  if (r.def.famiglia) return " Intanto puoi usare «Carta topografica (Esri)».";
+  return "";
+}
+
 function messaggioTessere(r) {
-  if (r.messaggio) return `«${r.def.nome}»: ${r.messaggio}. Tocca «Perché non si vede?» qui sotto per i dettagli.`;
+  if (r.messaggio) return `«${r.def.nome}»: ${r.messaggio}.${alternativaA(r)} Tocca «Perché non si vede?» qui sotto per i dettagli.`;
   if (usaPcn(r.urlEffettivo) && !ambiente().httpConsentito) {
     return `«${r.def.nome}»: il servizio del Ministero non risponde da una pagina https. Usa l'app Android oppure imposta un proxy (riquadro «Servizi del Ministero» qui sotto).`;
   }
-  return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento. Tocca «Perché non si vede?» qui sotto per i dettagli.`;
+  return `«${r.def.nome}» non risponde in quest'area o a questo ingrandimento.${alternativaA(r)} Tocca «Perché non si vede?» qui sotto per i dettagli.`;
 }
 
 /** Regione e livello del LiDAR: usa la scelta salvata, altrimenti la chiede. Restituisce false se annullata. */
@@ -400,6 +408,20 @@ async function costruisciLivelloSovr(r) {
   return layer;
 }
 
+/**
+ * Il LiDAR del Ministero a volte risponde con un'immagine tutta trasparente (zona senza copertura o server in difficoltà):
+ * chi lo accende vedrebbe soltanto la mappa di sotto e penserebbe a un difetto dell'app. Nell'app Android (dove si può
+ * leggere l'immagine) si prova la tessera al centro e, se è vuota, lo si dice. Una volta sola per accensione.
+ */
+async function avvisaSeVuoto(r) {
+  if (map.getZoom() < 13) return;
+  await new Promise((ok) => setTimeout(ok, 1200));
+  if (!r.on) return;
+  const e = await provaTessera({ url: urlProvaTessera(r), win: window });
+  if (!r.on || !e.ok || !e.vuota) return;
+  toast(`«${r.def.nome}»: il servizio risponde ma senza immagine in questo punto (zona senza copertura LiDAR, o server del Ministero in difficoltà: non dipende dall'app).${alternativaA(r)}`, 10000);
+}
+
 /** Accende o spegne un livello sovrapposto (dalla lista dei Livelli o dai pulsanti sulla mappa). */
 async function alternaSovr(r, acceso) {
   if (sessioneConfronto && !confrontoOccupato) {
@@ -425,6 +447,7 @@ async function alternaSovr(r, acceso) {
     r.layer.addTo(map);
     r.on = true;
     if (r.def.minZoom && map.getZoom() < r.def.minZoom) toast(`«${r.def.nome}» si vede da ingrandimento ${r.def.minZoom}.`);
+    else if (r.def.tipo === "wms-regione") avvisaSeVuoto(r).catch(() => {});
   } catch (e) {
     r.on = false;
     r.stato = "non risponde";
@@ -571,9 +594,9 @@ function disegnaSovr() {
 
 // ------------------------------------------------- pulsanti sulla mappa
 
-const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite", cyclosm: "CyclOSM", hot: "Umanitaria", voyager: "Voyager", positron: "Positron", s2: "Sentinel-2" };
+const BASE_BREVE = { osm: "Mappa", topo: "Rilievo", sat: "Satellite HD", "sat-esri": "Satellite Esri", cyclosm: "CyclOSM", hot: "Umanitaria", voyager: "Voyager", positron: "Positron", s2: "Sentinel-2", "esri-strade": "Stradale Esri", osmde: "OSM tedesca", dark: "Scura" };
 
-/** Apre l'elenco delle mappe di base, perché con otto mappe scorrerle una alla volta non è comodo. */
+/** Apre l'elenco delle mappe di base, perché con tante mappe scorrerle una alla volta non è comodo. */
 async function scegliBase() {
   const id = await scegli("Mappa di base", BASI.map((b) => ({ etichetta: b.id === baseAttiva ? `✓ ${b.nome}` : b.nome, valore: b.id })));
   if (id) cambiaBase(id);
@@ -845,7 +868,7 @@ async function verificaServizi() {
   const box = $("diagMsg");
   $("probeMsg").textContent = "Provo i servizi al centro della mappa…";
   box.replaceChildren();
-  const wms = [...sovr.values()].filter((r) => r.def.tipo !== "tile");
+  const wms = [...sovr.values()].filter((r) => r.def.tipo !== "tile" && !(r.def.provaSoloSeAcceso && !r.on));
   const schede = [];
   let ok = 0;
   try {

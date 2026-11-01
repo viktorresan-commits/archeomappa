@@ -23,7 +23,18 @@ export const BASI = [
   },
   {
     id: "sat",
-    nome: "Satellite (Esri)",
+    nome: "Satellite HD (Esri Clarity)",
+    nota: "Le immagini Esri nella versione «Clarity», più nitida. Dove una tessera manca usa l'immagine Esri standard. Oltre lo zoom 18 il dettaglio vero finisce: lo zoom 19 è solo l'immagine allargata.",
+    url: "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    urlRipiego: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    maxNativeZoom: 18, // Clarity non ha tessere oltre lo zoom 18 (risponde 404); l'Esri standard a 19 in campagna dà spesso un segnaposto grigio
+    maxZoom: 19,
+    attr: "Immagini © Esri (Clarity), Maxar, Earthstar Geographics",
+  },
+  {
+    id: "sat-esri",
+    nome: "Satellite Esri (classico)",
+    nota: "L'immagine Esri di sempre (è quella a cui si riferiscono il confronto con i satelliti storici e il riconoscimento automatico). Date e stagioni delle riprese possono essere diverse da quelle di «Satellite HD».",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     maxZoom: 19,
     attr: "Immagini © Esri, Maxar, Earthstar Geographics",
@@ -73,13 +84,39 @@ export const BASI = [
   },
   {
     id: "s2",
-    nome: "Sentinel-2 senza nuvole (EOX)",
-    nota: "Immagini Copernicus a 10 m per pixel, un mosaico 2020 senza nuvole: aperte, ma lontane quanto a dettaglio. Uso non commerciale.",
-    url: "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
+    nome: "Sentinel-2 senza nuvole 2024 (EOX)",
+    nota: "Immagini Copernicus a 10 m per pixel, mosaico 2024 senza nuvole: aperte, ma lontane quanto a dettaglio (utili per vedere vegetazione e campi, non strutture). Uso non commerciale.",
+    url: "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg",
     maxNativeZoom: 14,
     maxZoom: 19,
     senzaCors: true,
-    attr: "Sentinel-2 cloudless 2020 di EOX IT Services GmbH (contiene dati Copernicus Sentinel modificati 2020) – s2maps.eu",
+    attr: "Sentinel-2 cloudless 2024 di EOX IT Services GmbH (contiene dati Copernicus Sentinel modificati 2024) – s2maps.eu",
+  },
+  {
+    id: "esri-strade",
+    nome: "Stradale Esri",
+    nota: "Mappa stradale con edifici, toponimi e confini, a colori chiari; dati Esri, HERE, Garmin e OpenStreetMap.",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    maxZoom: 19,
+    attr: "© Esri, HERE, Garmin, OpenStreetMap contributors",
+  },
+  {
+    id: "osmde",
+    nome: "OpenStreetMap (stile tedesco)",
+    nota: "Stesso dato di OpenStreetMap con uno stile più ricco di dettagli (sentieri, edifici, curve di livello nei rilievi).",
+    url: "https://tile.openstreetmap.de/{z}/{x}/{y}.png",
+    maxZoom: 19,
+    attr: "© collaboratori di OpenStreetMap, server OpenStreetMap.de",
+  },
+  {
+    id: "dark",
+    nome: "CARTO scura (Dark Matter)",
+    nota: "Fondo scuro: fa risaltare ortofoto, LiDAR e rilievo chiari sovrapposti.",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    subdomains: "abcd",
+    maxZoom: 20,
+    senzaCors: true,
+    attr: "© collaboratori di OpenStreetMap © CARTO",
   },
 ];
 
@@ -127,7 +164,7 @@ export function urlPerAmbiente(url, { amb = ambiente(), proxy = "" } = {}) {
 export const SOVRAPPOSIZIONI = [
   {
     id: "ombre",
-    nome: "Rilievo ombreggiato (TINITALY 10 m)",
+    nome: "Rilievo ombreggiato – grigi (TINITALY 10 m)",
     tipo: "wms",
     // Modello del terreno dell'INGV a 10 m su tutta l'Italia: tre volte più fine dell'ombreggiatura Esri (circa 30 m).
     url: "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms",
@@ -139,7 +176,48 @@ export const SOVRAPPOSIZIONI = [
     rapido: true,
     etichettaRapida: "Ombre",
     attr: "Rilievo ombreggiato: TINITALY/1.1 © INGV (CC BY 4.0), Tarquini et al. 2023",
-    nota: "Aiuta a leggere terrazzamenti, argini e fossati a scala di paesaggio; il pixel è di 10 m, quindi non mostra strutture piccole (per quelle serve il LiDAR). Se il servizio non risponde usa «Rilievo ombreggiato (Esri)».",
+    nota: "Ombreggiatura in bianco e nero: aiuta a leggere terrazzamenti, argini e fossati a scala di paesaggio. Il pixel è di 10 m, quindi non mostra strutture piccole (per quelle serve il LiDAR). Se il servizio non risponde usa «Rilievo ombreggiato (Esri)».",
+    daVerificare: true,
+  },
+  {
+    id: "ombre-colori",
+    nome: "Rilievo a colori – quote e ombre (TINITALY 10 m)",
+    tipo: "wms",
+    url: "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms",
+    livelli: "tinitaly_hsv",
+    versione: "1.1.1",
+    maxNativeZoom: 15,
+    opacita: 0.7,
+    rapido: true,
+    etichettaRapida: "Rilievo colori",
+    attr: "Rilievo a colori: TINITALY/1.1 © INGV (CC BY 4.0), Tarquini et al. 2023",
+    nota: "Lo stesso modello a 10 m in colori (ombreggiatura con tinta che cambia con la quota), distinto dal bianco e nero di «Ombre» e dal LiDAR del Ministero. Copre tutta l'Italia, ma a 10 m per pixel.",
+    daVerificare: true,
+  },
+  {
+    id: "svf",
+    nome: "Apertura del cielo – SVF (TINITALY 10 m)",
+    tipo: "wms",
+    url: "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms",
+    livelli: "tinitaly_svf_2d5",
+    versione: "1.1.1",
+    maxNativeZoom: 15,
+    opacita: 0.75,
+    attr: "Sky-view factor: TINITALY/1.1 © INGV (CC BY 4.0), Tarquini et al. 2023",
+    nota: "Quanto cielo si vede da ogni punto del terreno: i punti più scuri sono avvallamenti, fossati e cavità, i più chiari rilievi e piani aperti. Non dipende da una direzione della luce, a differenza dell'ombreggiatura.",
+    daVerificare: true,
+  },
+  {
+    id: "pendenza",
+    nome: "Pendenza (TINITALY 10 m)",
+    tipo: "wms",
+    url: "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms",
+    livelli: "tinitaly_slope",
+    versione: "1.1.1",
+    maxNativeZoom: 15,
+    opacita: 0.75,
+    attr: "Pendenza: TINITALY/1.1 © INGV (CC BY 4.0), Tarquini et al. 2023",
+    nota: "Più chiaro = più ripido. Mette in evidenza scarpate, terrazzamenti e argini.",
     daVerificare: true,
   },
   {
@@ -225,12 +303,17 @@ export const SOVRAPPOSIZIONI = [
     attr: "© Esri, HERE, Garmin, OpenStreetMap",
     nota: "Carta con strade, edifici e curve di livello attuali: serve al confronto con il satellite quando l'IGM non risponde.",
   },
+  // Esri Wayback: ogni «rilascio» è un'istantanea del satellite Esri, con la data vera dell'archivio (waybackconfig.json,
+  // letto il 1° novembre 2026). La data è quella del rilascio, non di ogni fotogramma.
   ...[
-    ["wb2014", "2014", 10],
-    ["wb2018", "2018", 8255],
-    ["wb2022", "2022", 16245],
-    ["wb2026", "2026", 32246],
-  ].map(([id, anno, rilascio]) => ({
+    ["wb2014", "2014", 10, "20 febbraio 2014"],
+    ["wb2016", "2016", 388, "20 aprile 2016"],
+    ["wb2018", "2018", 8255, "14 marzo 2018"],
+    ["wb2020", "2020", 119, "14 ottobre 2020"],
+    ["wb2022", "2022", 16245, "27 aprile 2022"],
+    ["wb2024", "2024", 12428, "6 giugno 2024"],
+    ["wb2026", "2026", 32246, "30 giugno 2026"],
+  ].map(([id, anno, rilascio, data]) => ({
     id,
     nome: `Satellite Esri ${anno} (storico)`,
     tipo: "tile",
@@ -239,11 +322,95 @@ export const SOVRAPPOSIZIONI = [
     maxZoom: 19,
     opacita: 1,
     attr: "Immagini © Esri, Maxar, Earthstar Geographics (Wayback)",
-    nota: "Rilascio di Esri Wayback, circa " + anno + ": la data è quella del rilascio, non di ogni fotogramma. Utile a vedere tracce nelle colture in anni diversi.",
+    nota: `Rilascio Esri Wayback del ${data}: la data è quella del rilascio dell'archivio, non quella di ogni ripresa. Per vedere tracce nelle colture o nei campi, confronta anni diversi con «Confronta».`,
   })),
+  // Ortofoto storiche del Geoportale nazionale: stessi server, stesso meccanismo a due fusi dell'ortofoto 2012.
+  ...[
+    ["orto1988", "1988", "ortofoto_bn_88", "OI.ORTOIMMAGINI.1988", "bianco e nero", 12],
+    ["orto1994", "1994", "ortofoto_bn_94", "OI.ORTOIMMAGINI.1994", "bianco e nero", 12],
+    ["orto2006", "2006", "ortofoto_colore_06", "OI.ORTOIMMAGINI.2006", "a colori", 12],
+  ].map(([id, anno, mappa, famiglia, tipo, minZoom]) => ({
+    id,
+    nome: `Ortofoto ${anno} (${tipo}, Geoportale nazionale)`,
+    tipo: "wms",
+    url: WMS_PCN + `raster/${mappa}.map`,
+    famiglia,
+    minZoom,
+    maxNativeZoom: 17,
+    opacita: 1,
+    attr: "© Ministero dell'Ambiente e della Sicurezza Energetica – Geoportale Nazionale",
+    nota: `Ortofoto ${tipo} del ${anno} (l'anno è quello del livello del Geoportale): serve a vedere com'era il territorio prima delle trasformazioni recenti. Server del Ministero, a volte in errore: se non si vede, l'app lo dice e ripete la richiesta da sola.`,
+    daVerificare: true,
+    provaSoloSeAcceso: true, // «Verifica servizi» non lo prova se è spento: sono tanti formati e il server è lento
+  })),
+  // Cartografia storica regionale (servizi WMS delle Regioni, verificati con una richiesta vera il 1° novembre 2026).
+  {
+    id: "castore",
+    nome: "Catasto ottocentesco della Toscana (CASTORE)",
+    tipo: "wms",
+    url: "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore",
+    livelli: "r_toscan_cst_fogli",
+    versione: "1.3.0",
+    minZoom: 15, // sotto lo zoom 15 il servizio non disegna i fogli
+    maxNativeZoom: 18,
+    opacita: 0.9,
+    attr: "© Regione Toscana – progetto CASTORE (Archivio di Stato di Firenze)",
+    nota: "Fogli del catasto storico della Toscana (Catasto Generale): particelle, strade e fabbricati dell'Ottocento. Solo Toscana, da zoom 15. Fonte: Regione Toscana; per la pubblicazione controlla le condizioni d'uso.",
+    daVerificare: true,
+  },
+  {
+    id: "inghirami",
+    nome: "Carta geometrica della Toscana (Inghirami, 1830 circa)",
+    tipo: "wms",
+    url: "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore",
+    livelli: "r_toscan_cst_inghirami",
+    versione: "1.3.0",
+    minZoom: 9,
+    maxNativeZoom: 14, // oltre, la carta (a scala 1:200.000) è solo ingrandita e si vedono i pixel
+    opacita: 0.9,
+    attr: "© Regione Toscana – progetto CASTORE",
+    nota: "Carta storica d'insieme della Toscana con toponimi, strade, pievi e rilievi tratteggiati: utile per i nomi e la viabilità antica. Solo Toscana.",
+    daVerificare: true,
+  },
+  {
+    id: "bz1858",
+    nome: "Catasto storico del 1858 (Alto Adige)",
+    tipo: "wms",
+    url: "https://geoservices5.civis.bz.it/geoserver/ows",
+    livelli: "p_bz-Cadastre-Historical:Cadastre1858-Map",
+    versione: "1.3.0",
+    minZoom: 12,
+    maxNativeZoom: 19,
+    opacita: 0.9,
+    attr: "© Provincia autonoma di Bolzano – Alto Adige (Geoportale)",
+    nota: "Mappa del catasto di Francesco I (1858): edifici, campi, boschi e strade di allora, a colori. Solo Alto Adige. Fonte: Provincia autonoma di Bolzano; per la pubblicazione controlla le condizioni d'uso.",
+    daVerificare: true,
+  },
+  {
+    id: "nomi",
+    nome: "Nomi dei luoghi (Esri)",
+    tipo: "tile",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    maxNativeZoom: 17,
+    maxZoom: 19,
+    opacita: 1,
+    attr: "Nomi e confini © Esri",
+    nota: "Toponimi e confini da sovrapporre al satellite, all'ortofoto o al LiDAR.",
+  },
+  {
+    id: "sentieri",
+    nome: "Sentieri escursionistici (Waymarked Trails)",
+    tipo: "tile",
+    url: "https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png",
+    maxNativeZoom: 17,
+    maxZoom: 19,
+    opacita: 0.9,
+    attr: "Sentieri © Waymarked Trails (CC BY-SA); dati © collaboratori di OpenStreetMap",
+    nota: "Sentieri e percorsi segnalati mappati su OpenStreetMap: utili per raggiungere un sito sul terreno.",
+  },
   {
     id: "lidar",
-    nome: "LiDAR (Geoportale nazionale)",
+    nome: "LiDAR – grigi (Ministero, Geoportale nazionale)",
     tipo: "wms-regione",
     modello: WMS_PCN + "servizi-LiDAR/LIDAR_<REGIONE>.map",
     // Nomi dei file e dei livelli presi da un'app che li usa davvero (Marche e Umbria).
@@ -273,7 +440,7 @@ export const SOVRAPPOSIZIONI = [
     rapido: true,
     etichettaRapida: "LiDAR",
     attr: "© MASE – Piano Straordinario di Telerilevamento Ambientale (CC BY 4.0)",
-    nota: "Per ora Marche e Umbria. È l'immagine che il Ministero produce (256 grigi, senza ombre): per vedere il terreno nitido, in metri e con le ombre usa la scheda Rilievo. Il servizio è raggiungibile in http: nell'app Android funziona, dal sito (https) serve un proxy (vedi sotto) oppure carica un file nella scheda Rilievo.",
+    nota: "Per ora Marche e Umbria. È l'immagine che il Ministero produce: 256 livelli di grigio, senza ombre (il rilievo a colori è un livello a parte: «Rilievo a colori»). Se resta vuoto, in quella zona manca la copertura o il server del Ministero ha un guasto (il 1° novembre 2026 rispondeva con immagini vuote in tutte le zone provate): non dipende dall'app. Per vedere il terreno in metri e con le ombre carica un file nella scheda Rilievo. Il servizio è in http: nell'app Android funziona, dal sito (https) serve un proxy (vedi sotto).",
     daVerificare: true,
   },
 ];
@@ -297,20 +464,49 @@ export function prodottiRegione(def, regione) {
   return def.prodotti?.[regione] ?? [];
 }
 
+/**
+ * Livello a tessere con una seconda fonte di ripiego: se la tessera della fonte principale manca (o dà errore),
+ * la stessa tessera si chiede alla fonte di ripiego (`def.urlRipiego`), una sola volta.
+ */
+export function capaConRipiego(L, def, opzioni) {
+  const riempi = (modello, z, c) => L.Util.template(modello, { x: c.x, y: c.y, z, s: "a", r: "" });
+  const Capa = L.TileLayer.extend({
+    createTile(coords, fatto) {
+      const z = this._getZoomForUrl();
+      let ripiegata = false;
+      return L.TileLayer.prototype.createTile.call(this, coords, (err, t) => {
+        if (err && !ripiegata) {
+          ripiegata = true;
+          t.src = riempi(def.urlRipiego, z, coords); // «load» o «error» richiamano questa funzione
+          return;
+        }
+        fatto(err, t);
+      });
+    },
+  });
+  return new Capa(def.url, opzioni);
+}
+
 /** Crea il livello Leaflet. `L` viene passato dal chiamante (nessun globale qui). */
 export function creaLivello(L, def, { livelli, url, versione, tileSize } = {}) {
   const comuni = { attribution: def.attr, opacity: def.opacita ?? 1, maxZoom: def.maxZoom ?? 19 };
   if (def.minZoom) comuni.minZoom = def.minZoom;
   if (def.tipo === "tile" || def.url?.includes("{z}")) {
-    return L.tileLayer(def.url, {
+    const opzioni = {
       ...comuni,
       subdomains: def.subdomains ?? "abc",
       maxNativeZoom: def.maxNativeZoom,
       crossOrigin: !def.senzaCors, // risposte non opache: la cache offline le può conservare (salvo le mappe che non mandano il CORS)
-    });
+    };
+    return def.urlRipiego ? capaConRipiego(L, def, opzioni) : L.tileLayer(def.url, opzioni);
   }
   if (def.maxNativeZoom) comuni.maxNativeZoom = def.maxNativeZoom;
   if (tileSize) comuni.tileSize = tileSize; // 512: meno richieste, come l'app Grok
+  // Con lo zoom a due dita la mappa passa per molti ingrandimenti intermedi: per i servizi lenti del Ministero si chiede
+  // solo quello finale (altrimenti decine di richieste inutili affollano il server e le tessere vere arrivano tardi o mai).
+  comuni.updateWhenZooming = false;
+  comuni.updateInterval = 300;
+  comuni.keepBuffer = 3;
   if (def.crs === "EPSG:4258") {
     // Leaflet sa chiedere solo in 3857: qui la tessera si calcola in gradi, nell'ordine di assi del WMS 1.3.0
     const Capa = L.TileLayer.extend({

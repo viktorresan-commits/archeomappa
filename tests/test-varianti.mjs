@@ -1,6 +1,6 @@
 // Varianti di richiesta per ortofoto e IGM. Esegui con: node tests/test-varianti.mjs
 import assert from "node:assert/strict";
-import { fusoPerLon, variantiPcn, variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva } from "../js/varianti.js";
+import { fusoPerLon, variantiPcn, variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva, urlConVariante } from "../js/varianti.js";
 import { SOVRAPPOSIZIONI, urlTessera, WMS_PCN } from "../js/layers.js";
 import { tuttoTrasparente } from "../js/tessere.js";
 
@@ -106,19 +106,71 @@ test("l'IGM 1:25.000 non si chiede da lontano: il servizio non disegna sotto lo 
   assert.equal(per("igm25").minZoom, 13);
   assert.equal(per("igm25").maxNativeZoom, 16);
 });
-test("ci sono il satellite storico Esri (quattro rilasci) e la carta topografica Esri", () => {
-  for (const id of ["wb2014", "wb2018", "wb2022", "wb2026", "topoesri"]) {
+test("ci sono il satellite storico Esri (sette rilasci, dal 2014 al 2026, con la data vera) e la carta topografica Esri", () => {
+  for (const id of ["wb2014", "wb2016", "wb2018", "wb2020", "wb2022", "wb2024", "wb2026", "topoesri"]) {
     const d = per(id);
     assert.ok(d, id);
     assert.equal(d.tipo, "tile");
     assert.match(d.url, /\{z\}.*\{y\}.*\{x\}|\{z\}\/\{y\}\/\{x\}/);
+    if (id.startsWith("wb")) assert.match(d.nota, /\d{1,2} \w+ 20\d\d/, `${id}: la nota dice la data del rilascio`);
   }
   assert.match(per("wb2014").url, /tile\/10\/\{z\}\/\{y\}\/\{x\}$/);
   assert.match(per("wb2026").url, /tile\/32246\/\{z\}\/\{y\}\/\{x\}$/);
+  const rilasci = SOVRAPPOSIZIONI.filter((s) => s.id.startsWith("wb")).map((s) => s.url.match(/tile\/(\d+)\//)[1]);
+  assert.equal(new Set(rilasci).size, rilasci.length, "ogni anno ha il suo rilascio");
 });
-test("sono «rapidi» (pulsanti sulla mappa) LiDAR, ortofoto, IGM, catasto e ombre", () => {
+test("le ortofoto storiche del Geoportale (1988, 1994, 2006) usano lo stesso meccanismo dei fusi", () => {
+  for (const [id, famiglia] of [["orto1988", "OI.ORTOIMMAGINI.1988"], ["orto1994", "OI.ORTOIMMAGINI.1994"], ["orto2006", "OI.ORTOIMMAGINI.2006"]]) {
+    const d = per(id);
+    assert.ok(d, id);
+    assert.equal(d.tipo, "wms");
+    assert.equal(d.famiglia, famiglia);
+    assert.ok(!d.livelli, "il livello lo decide la variante");
+    assert.match(d.url, /^https:\/\/wms\.pcn\.minambiente\.it\/ogc\?map=\/ms_ogc\/WMS_v1\.3\/raster\/ortofoto_.*\.map$/);
+  }
+});
+test("urlConVariante: stessa tessera, altri livelli, altra versione e il nome giusto del parametro del sistema di riferimento", () => {
+  const url = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/IGM_25000.map&service=WMS&request=GetMap&layers=CB.IGM25000.32%2CCB.IGM25000.33&styles=&format=image%2Fpng&transparent=true&version=1.3.0&width=512&height=512&crs=EPSG%3A3857&bbox=1100000%2C5400000%2C1200000%2C5500000";
+  const [, , c] = variantiPcn("CB.IGM25000", 12.9);
+  const u = new URL(urlConVariante(url, c));
+  assert.equal(u.searchParams.get("LAYERS"), "CB.IGM25000.33");
+  assert.equal(u.searchParams.get("VERSION"), "1.1.1");
+  assert.equal(u.searchParams.get("SRS"), "EPSG:3857");
+  assert.equal(u.searchParams.get("CRS"), null, "in 1.1.1 il parametro è SRS");
+  assert.equal(u.searchParams.get("bbox"), "1100000,5400000,1200000,5500000", "il riquadro non cambia");
+  assert.equal(u.searchParams.get("map"), "/ms_ogc/WMS_v1.3/raster/IGM_25000.map");
+  assert.equal(u.searchParams.get("layers"), null, "nessun parametro doppio con la maiuscola diversa");
+  const [a] = variantiPcn("CB.IGM25000", 12.9);
+  const v = new URL(urlConVariante(u.href, a));
+  assert.equal(v.searchParams.get("CRS"), "EPSG:3857");
+  assert.equal(v.searchParams.get("SRS"), null);
+  assert.equal(v.searchParams.get("LAYERS"), "CB.IGM25000.32,CB.IGM25000.33");
+});
+test("sono «rapidi» (pulsanti sulla mappa) LiDAR, rilievo a colori, ortofoto, IGM, catasto e ombre", () => {
   const rapidi = SOVRAPPOSIZIONI.filter((s) => s.rapido).map((s) => s.id).sort();
-  assert.deepEqual(rapidi, ["catasto", "igm25", "lidar", "ombre", "ortofoto"]);
+  assert.deepEqual(rapidi, ["catasto", "igm25", "lidar", "ombre", "ombre-colori", "ortofoto"]);
+});
+test("LiDAR del Ministero (grigi) e rilievo a colori sono due livelli distinti, con nomi che lo dicono", () => {
+  assert.match(per("lidar").nome, /LiDAR.*grigi/i);
+  assert.match(per("ombre").nome, /grigi/i);
+  assert.match(per("ombre-colori").nome, /colori/i);
+  assert.equal(per("ombre-colori").livelli, "tinitaly_hsv");
+  assert.equal(per("ombre").livelli, "tinitaly_hshd");
+  assert.notEqual(per("lidar").tipo, per("ombre-colori").tipo);
+  for (const id of ["svf", "pendenza"]) assert.equal(per(id).url, per("ombre").url, id);
+});
+test("cartografia storica regionale: catasto toscano, carta Inghirami, catasto 1858 dell'Alto Adige (WMS 1.3.0 con livello fisso)", () => {
+  for (const [id, livello] of [["castore", "r_toscan_cst_fogli"], ["inghirami", "r_toscan_cst_inghirami"], ["bz1858", "p_bz-Cadastre-Historical:Cadastre1858-Map"]]) {
+    const d = per(id);
+    assert.ok(d, id);
+    assert.equal(d.tipo, "wms");
+    assert.equal(d.livelli, livello);
+    assert.equal(d.versione, "1.3.0");
+    assert.match(d.url, /^https:\/\//);
+    assert.ok(!d.url.endsWith("&"), `${id}: l'indirizzo non finisce con «&»`);
+    assert.match(d.attr, /Toscana|Bolzano/);
+  }
+  assert.ok(per("inghirami").maxNativeZoom <= 14, "la carta 1:200.000 non ha più dettaglio oltre");
 });
 
 console.log(`\n${ok} controlli eseguiti.`);

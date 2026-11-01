@@ -6,8 +6,9 @@
  * ombreggiature a scala larga (TINITALY 10 m, Esri 30 m: sopra il LiDAR lo velerebbero), poi le carte e le immagini.
  */
 export const ORDINE_PREDEFINITO = [
-  "catasto", "lidar", "ombre", "igm25", "igm100", "ombre-esri", "topoesri", "ortofoto",
-  "wb2026", "wb2022", "wb2018", "wb2014",
+  "nomi", "sentieri", "catasto", "lidar", "svf", "pendenza", "ombre", "ombre-colori", "igm25", "igm100", "inghirami", "castore", "bz1858",
+  "ombre-esri", "topoesri", "ortofoto",
+  "wb2026", "wb2024", "wb2022", "wb2020", "wb2018", "wb2016", "wb2014", "orto2006", "orto1994", "orto1988",
 ];
 
 /**

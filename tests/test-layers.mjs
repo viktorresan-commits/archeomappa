@@ -189,8 +189,8 @@ test("la richiesta TINITALY di prova è nello stesso formato di quella dell'app 
 });
 
 console.log("mappe di base");
-test("ci sono otto mappe di base, con id unici, indirizzo con {z}/{x}/{y} e nome", () => {
-  assert.equal(BASI.length, 8);
+test("ci sono dodici mappe di base, con id unici, indirizzo con {z}/{x}/{y} e nome", () => {
+  assert.equal(BASI.length, 12);
   assert.equal(new Set(BASI.map((b) => b.id)).size, BASI.length);
   for (const b of BASI) {
     assert.ok(b.nome && b.attr, b.id);
@@ -198,22 +198,74 @@ test("ci sono otto mappe di base, con id unici, indirizzo con {z}/{x}/{y} e nome
     assert.match(b.url, /\{z\}/); assert.match(b.url, /\{x\}/); assert.match(b.url, /\{y\}/);
   }
 });
-test("le nuove basi libere ci sono: CyclOSM, OSM Umanitaria, CARTO Voyager e Positron, Sentinel-2 senza nuvole", () => {
+test("nessun livello, di base o sovrapposto, chiede una chiave o un token (l'app non ne ha)", () => {
+  const indirizzi = [...BASI.flatMap((b) => [b.url, b.urlRipiego]), ...SOVRAPPOSIZIONI.map((s) => s.url ?? s.modello)].filter(Boolean);
+  for (const u of indirizzi) assert.doesNotMatch(u, /[?&](api_?key|key|token|access_token|apikey)=|stadiamaps|thunderforest|maptiler|mapbox\.com/i, u);
+});
+test("le nuove basi libere ci sono: CyclOSM, OSM Umanitaria, CARTO Voyager, Positron e scura, OSM tedesca, stradale Esri, Sentinel-2", () => {
   const per = (id) => BASI.find((b) => b.id === id);
-  for (const id of ["cyclosm", "hot", "voyager", "positron", "s2"]) assert.ok(per(id), id);
+  for (const id of ["cyclosm", "hot", "voyager", "positron", "s2", "dark", "osmde", "esri-strade"]) assert.ok(per(id), id);
   assert.match(per("cyclosm").url, /tile-cyclosm\.openstreetmap\.fr\/cyclosm\//);
   assert.match(per("hot").url, /tile\.openstreetmap\.fr\/hot\//);
   assert.match(per("voyager").url, /basemaps\.cartocdn\.com\/rastertiles\/voyager\//);
   assert.match(per("positron").url, /basemaps\.cartocdn\.com\/light_all\//);
-  assert.match(per("s2").url, /tiles\.maps\.eox\.at\/wmts\/1\.0\.0\/s2cloudless-2020_3857\/default\/g\/\{z\}\/\{y\}\/\{x\}\.jpg$/);
+  assert.match(per("dark").url, /basemaps\.cartocdn\.com\/dark_all\//);
+  assert.match(per("osmde").url, /tile\.openstreetmap\.de\//);
+  assert.match(per("esri-strade").url, /World_Street_Map\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
+  assert.match(per("s2").url, /tiles\.maps\.eox\.at\/wmts\/1\.0\.0\/s2cloudless-2024_3857\/default\/g\/\{z\}\/\{y\}\/\{x\}\.jpg$/);
   assert.match(per("s2").nota, /non commerciale/i);
 });
+test("il satellite principale è Esri Clarity (più nitido) con ripiego sull'Esri standard; il classico resta disponibile", () => {
+  const per = (id) => BASI.find((b) => b.id === id);
+  assert.match(per("sat").url, /^https:\/\/clarity\.maptiles\.arcgis\.com\/.*World_Imagery\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
+  assert.match(per("sat").urlRipiego, /^https:\/\/server\.arcgisonline\.com\/.*World_Imagery\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}$/);
+  assert.equal(per("sat").maxNativeZoom, 18, "Clarity non ha tessere a 19: oltre il 18 si allarga l'ultima");
+  assert.equal(per("sat").maxZoom, 19);
+  assert.match(per("sat-esri").url, /^https:\/\/server\.arcgisonline\.com\//);
+  assert.ok(!per("sat-esri").urlRipiego);
+});
+// livello finto con la parte di Leaflet che serve a capaConRipiego
+function leafletFinto() {
+  const creati = [];
+  class TileLayer {
+    constructor(url, o) { this.url = url; this.options = o; creati.push(this); }
+    _getZoomForUrl() { return this.zoomFinto ?? 16; }
+    createTile(coords, fatto) { const t = { src: "", fine: (err) => fatto(err, t) }; return t; }
+  }
+  TileLayer.extend = (proto) => { class C extends TileLayer {} Object.assign(C.prototype, proto); return C; };
+  const L = { TileLayer, tileLayer: (url, o) => new TileLayer(url, o), Util: { template: (str, d) => str.replace(/\{(\w+)\}/g, (_, k) => d[k] ?? "") } };
+  return { L, creati };
+}
+test("tessera Clarity mancante: si chiede la stessa tessera all'Esri standard, una volta sola", () => {
+  const { L } = leafletFinto();
+  const def = BASI.find((b) => b.id === "sat");
+  const capa = creaLivello(L, { ...def, tipo: "tile" });
+  assert.equal(capa.url, def.url);
+  const chiusure = [];
+  const t = capa.createTile({ x: 10, y: 20, z: 16 }, (err, tt) => chiusure.push(err));
+  t.fine(new Error("404"));
+  assert.equal(t.src, "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/16/20/10");
+  assert.equal(chiusure.length, 0, "non si chiude: aspetta la tessera di ripiego");
+  t.fine(null);
+  assert.deepEqual(chiusure, [null]);
+  const u = capa.createTile({ x: 1, y: 2, z: 16 }, (err) => chiusure.push(err));
+  u.fine(new Error("404")); u.fine(new Error("ancora 404"));
+  assert.equal(chiusure.length, 2);
+  assert.equal(chiusure[1].message, "ancora 404", "dopo il ripiego l'errore resta un errore");
+});
 test("le basi senza CORS non chiedono crossOrigin (altrimenti il browser le rifiuta); le altre sì", () => {
-  const visti = {};
-  const L = { tileLayer: (url, o) => { visti[url] = o; return {}; } };
+  const { L, creati } = leafletFinto();
   for (const b of BASI) creaLivello(L, { ...b, tipo: "tile" });
-  for (const b of BASI) assert.equal(visti[b.url].crossOrigin, !b.senzaCors, b.id);
+  assert.equal(creati.length, BASI.length);
+  creati.forEach((c, i) => assert.equal(c.options.crossOrigin, !BASI[i].senzaCors, BASI[i].id));
   assert.ok(BASI.some((b) => b.senzaCors), "almeno una base senza CORS");
+});
+test("i livelli WMS non caricano a ogni passo dello zoom a due dita, ma solo alla fine", () => {
+  let visto = null;
+  const L = { tileLayer: { wms: (url, o) => { visto = o; return {}; } } };
+  creaLivello(L, SOVRAPPOSIZIONI.find((o) => o.id === "igm25"), { livelli: "CB.IGM25000.33", versione: "1.1.1", tileSize: 256 });
+  assert.equal(visto.updateWhenZooming, false);
+  assert.ok(visto.updateInterval >= 200);
 });
 
 test("creaLivello passa versione e dimensione della tessera al WMS", () => {
