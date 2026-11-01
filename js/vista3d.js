@@ -279,6 +279,12 @@ export async function apriVista3D(opzioni) {
   }
   mappa.on("moveend", aggiornaQuotaCentro);
   mappa.on("idle", aggiornaQuotaCentro);
+  // Con il rilievo acceso e la mappa inclinata, quando le quote arrivano MapLibre tiene ferma la camera e sposta il punto
+  // al centro dello schermo (di quota × tan(inclinazione): centinaia di metri in montagna). Se l'utente non ha ancora toccato
+  // la vista, la si rimette sul punto da cui si è partiti, così la 3D mostra ciò che si guardava nella mappa 2D.
+  let toccata = false;
+  for (const ev of ["pointerdown", "touchstart", "wheel", "keydown"]) contenitore.addEventListener(ev, () => { toccata = true; }, { passive: true, capture: true });
+  mappa.once("idle", () => { if (!toccata && !chiusa) mappa.jumpTo({ center: [centro[1], centro[0]] }); });
   mappa.on("click", (e) => {
     const q = quotaPunto(e.lngLat);
     new ml.Popup({ closeButton: true, maxWidth: "240px" })

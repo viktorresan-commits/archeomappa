@@ -1,0 +1,139 @@
+# Prova a mano (Actions → «Diagnosi LiDAR» → Run workflow): terza parte.
+# 1) GetCapabilities dei servizi LiDAR di Marche e Umbria: livelli, stili, soglie di scala, riquadri geografici;
+# 2) GetMap a vari ingrandimenti e luoghi: la tessera è a grigi o a colori? ha dati? (base64 nel registro per vederle);
+# 3) tessere di prova dei cataloghi storici (CASTORE, Alto Adige 1858) e della carta Inghirami;
+# 4) copertura di Esri Clarity in aree rurali e confronto con la tessera «dato non disponibile».
+name: Diagnosi LiDAR
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prove
+        shell: bash
+        run: |
+          pip install --quiet pillow numpy 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import io, math, re, time, html, base64, traceback, hashlib, urllib.request, urllib.error
+          from PIL import Image
+          UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+          M = 20037508.342789244
+          def get(url, t=60):
+              t0 = time.time()
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA, "Origin": "https://viktorresan-commits.github.io"}), timeout=t)
+                  return r.status, dict((k.lower(), v) for k, v in r.headers.items()), r.read(), time.time() - t0
+              except urllib.error.HTTPError as e:
+                  return e.code, dict((k.lower(), v) for k, v in e.headers.items()), e.read(), time.time() - t0
+              except Exception as e:
+                  return 0, {}, str(e).encode(), time.time() - t0
+          def testo(c, n=240):
+              t = html.unescape(re.sub(r"<[^>]+>", " ", c.decode("utf8", "replace"))); return re.sub(r"\s+", " ", t).strip()[:n]
+          def tile_di(lat, lon, z):
+              n = 2 ** z; return int((lon + 180) / 360 * n), int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n)
+          def merc(z, x, y):
+              s = 2 * M / 2 ** z; return (-M + x * s, M - (y + 1) * s, -M + (x + 1) * s, M - y * s)
+          def sezione(nome, f):
+              print("\n=== " + nome, flush=True)
+              try: f()
+              except Exception: print("ERRORE nella sezione:", traceback.format_exc()[-800:])
+          def wms(base, versione, livelli, bb, px=256, crs="EPSG:3857", stili=""):
+              sep = "&" if "?" in base else "?"
+              nome = "SRS" if versione == "1.1.1" else "CRS"
+              return "%s%sSERVICE=WMS&VERSION=%s&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=true&LAYERS=%s&STYLES=%s&%s=%s&WIDTH=%d&HEIGHT=%d&BBOX=%s" % (base, sep, versione, livelli, stili, nome, crs, px, px, ",".join("%.3f" % v for v in bb))
+          def analisi(b):
+              im = Image.open(io.BytesIO(b)).convert("RGBA")
+              a = im.getchannel("A"); dati = [v for v in a.getdata() if v > 8]
+              frac = len(dati) / (im.width * im.height)
+              rgb = im.convert("RGB"); hsv = rgb.convert("HSV")
+              sat = [s for (h, s, v), al in zip(hsv.getdata(), a.getdata()) if al > 8]
+              ms = (sum(sat) / len(sat)) if sat else 0
+              return im.size, frac, ms
+          def prova_tessera(etichetta, url, salva=False):
+              st, h, b, s = get(url)
+              if st == 200 and h.get("content-type", "").startswith("image/"):
+                  try:
+                      dim, frac, ms = analisi(b)
+                      print("   %-52s %dx%d %6d byte, con dati %3d%%, saturazione media %3d/255 (%s), %.1f s" % (etichetta, dim[0], dim[1], len(b), round(100 * frac), ms, "COLORI" if ms > 40 else "grigi", s), flush=True)
+                      if salva and frac > 0.02: print("IMG %s %d %s" % (etichetta.replace(" ", "_"), len(b), base64.b64encode(b).decode()), flush=True)
+                  except Exception as e:
+                      print("   %-52s immagine illeggibile: %s" % (etichetta, e))
+              else:
+                  print("   %-52s HTTP %d %s: %s" % (etichetta, st, h.get("content-type", ""), testo(b, 200)), flush=True)
+          PCN = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/"
+          def capab():
+              for mappa in ("LIDAR_MARCHE.map", "LIDAR_UMBRIA_2.map"):
+                  for ver in ("1.1.1", "1.3.0"):
+                      st, h, b, s = get(PCN + mappa + "&SERVICE=WMS&REQUEST=GetCapabilities&VERSION=" + ver)
+                      t = b.decode("utf8", "replace")
+                      print("%s GetCapabilities %s: HTTP %d, %d byte, %.1f s" % (mappa, ver, st, len(b), s))
+                      if st != 200 or "<Layer" not in t:
+                          print("   ", testo(b, 300)); continue
+                      for blocco in re.findall(r"<Layer[^>]*>.*?</Layer>", t, re.S):
+                          nome = re.search(r"<Name>([^<]+)</Name>", blocco)
+                          if not nome or "LIDAR" not in nome.group(1).upper(): continue
+                          titolo = re.search(r"<Title>([^<]*)</Title>", blocco)
+                          stili = re.findall(r"<Style>\s*<Name>([^<]*)</Name>", blocco)
+                          scala = re.findall(r"<(?:Min|Max)ScaleDenominator>([^<]*)<", blocco) + re.findall(r"<ScaleHint[^>]*/>", blocco)
+                          bb = re.search(r"<(?:LatLonBoundingBox|EX_GeographicBoundingBox)[^>]*>.*?(?:</EX_GeographicBoundingBox>|/>)", blocco, re.S)
+                          print("   livello %-34s %s | stili %s | scala %s | %s" % (nome.group(1), titolo.group(1) if titolo else "", stili or "—", scala or "—", re.sub(r"\s+", " ", bb.group(0))[:160] if bb else "—"))
+                      break
+          sezione("1) GetCapabilities dei servizi LiDAR", capab)
+          LUOGHI = {"MARCHE": [("Fabriano", 43.337, 12.905), ("Ancona", 43.617, 13.517), ("Urbino", 43.726, 12.636), ("Macerata", 43.300, 13.453), ("Pesaro", 43.910, 12.913), ("Ascoli", 42.854, 13.575)],
+                    "UMBRIA": [("Perugia", 43.110, 12.389), ("Gubbio", 43.351, 12.578), ("Assisi", 43.071, 12.616), ("Terni", 42.563, 12.645), ("Spoleto", 42.735, 12.738)]}
+          LIV = {"MARCHE": ["EL.LIDAR.MARCHE.1x1.DTM", "EL.LIDAR.MARCHE.1x1.DSM_LAST", "EL.LIDAR.MARCHE.2x2.DTM"],
+                 "UMBRIA": ["EL.LIDAR.UMBRIA.1x1.DTM", "EL.LIDAR.UMBRIA.1x1.T1.DSM_FIRST"]}
+          MAPPE = {"MARCHE": "LIDAR_MARCHE.map", "UMBRIA": "LIDAR_UMBRIA_2.map"}
+          def getmap():
+              salvate = 0
+              for reg in ("MARCHE", "UMBRIA"):
+                  for liv in LIV[reg]:
+                      print("-- %s %s" % (reg, liv))
+                      for (nome, lat, lon) in LUOGHI[reg]:
+                          for z in (9, 11, 13, 15, 17):
+                              x, y = tile_di(lat, lon, z)
+                              salva = (salvate < 14 and z in (13, 17) and liv.endswith(("1x1.DTM",)) and nome in ("Fabriano", "Ancona", "Perugia", "Gubbio"))
+                              if salva: salvate += 1
+                              prova_tessera("%s %s z%d" % (liv.split(".")[-1] + "/" + liv.split(".")[2], nome, z), wms(PCN + MAPPE[reg], "1.1.1", liv, merc(z, x, y)), salva)
+          sezione("2) GetMap LiDAR: grigi o colori, con dati o vuoto, a vari ingrandimenti", getmap)
+          def tinitaly():
+              base = "https://tinitaly.pi.ingv.it/TINItaly_1_1/wms"
+              for liv in ("tinitaly_hshd", "tinitaly_dtm", "tinitaly_slope", "tinitaly_aspect"):
+                  for z in (10, 13, 15):
+                      x, y = tile_di(43.337, 12.905, z)
+                      prova_tessera("TINITALY %s z%d" % (liv, z), wms(base, "1.1.1", liv, merc(z, x, y)), z == 13 and liv in ("tinitaly_hshd", "tinitaly_dtm"))
+              st, h, b, s = get(base + "?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.1.1")
+              t = b.decode("utf8", "replace")
+              print("TINITALY capabilities HTTP %d" % st)
+              for n, ti in re.findall(r"<Layer[^>]*>\s*<Name>([^<]+)</Name>\s*<Title>([^<]*)</Title>", t): print("   livello %s — %s" % (n, ti))
+          sezione("3) TINITALY: livelli disponibili e aspetto", tinitaly)
+          def immagine(nome, url, z, lat, lon):
+              x, y = tile_di(lat, lon, z)
+              st, h, b, s = get(url(z, x, y))
+              print("IMG %s %d %s" % (nome, len(b), base64.b64encode(b).decode() if st == 200 and h.get("content-type", "").startswith("image/") else "ERR%s" % st), flush=True)
+          def storici():
+              C = "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore&"
+              for liv, z in (("r_toscan_cst_fogli", 16), ("r_toscan_cst_fogli", 14), ("r_toscan_cst_inghirami", 13), ("r_toscan_cst_inghirami", 15), ("r_toscan_cst_riempimento_raster", 15), ("r_toscan_cst_quadri_unione", 13), ("r_toscan_castore2", 15), ("r_toscan_cst_sezioni_topo.5", 15)):
+                  immagine("CASTORE_%s_z%d" % (liv.replace("r_toscan_", ""), z), lambda z, x, y, liv=liv: wms(C, "1.3.0", liv, merc(z, x, y)), z, 43.7696, 11.2558)
+              A = "https://geoservices5.civis.bz.it/geoserver/ows"
+              for liv in ("p_bz-Cadastre-Historical:Cadastre1858", "p_bz-Cadastre-Historical:Cadastre1858-Map"):
+                  immagine("ALTOADIGE_%s_z16" % liv.split(":")[1], lambda z, x, y, liv=liv: wms(A, "1.3.0", liv, merc(z, x, y)), 16, 46.4983, 11.3548)
+              st, h, b, s = get(A + "?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0")
+              t = b.decode("utf8", "replace")
+              for n, ti in re.findall(r"<Layer[^>]*>\s*<Name>([^<]*[Cc]adastre[^<]*)</Name>\s*<Title>([^<]*)</Title>", t): print("   livello Alto Adige %s — %s" % (n, ti))
+          sezione("4) tessere dei servizi storici", storici)
+          def clarity():
+              CL = "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/%d/%d/%d"
+              WI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%d/%d/%d"
+              for nome, lat, lon in (("Sardegna interna", 40.05, 9.30), ("Alpi", 46.50, 11.90), ("Sicilia interna", 37.50, 14.30), ("Basilicata", 40.55, 16.10), ("Friuli", 46.20, 13.10), ("Puglia", 40.90, 16.40)):
+                  for z in (16, 17, 18):
+                      x, y = tile_di(lat, lon, z)
+                      sc, hc, bc, _ = get(CL % (z, y, x)); se, he, be, _ = get(WI % (z, y, x))
+                      print("   %-18s z%d Clarity: HTTP %d %6d byte md5 %s | World Imagery: HTTP %d %6d byte md5 %s" % (nome, z, sc, len(bc), hashlib.md5(bc).hexdigest()[:8], se, len(be), hashlib.md5(be).hexdigest()[:8]))
+          sezione("5) copertura di Esri Clarity in aree rurali", clarity)
+          PY
+          python3 prova.py 2>&1 | tee uscita.txt
