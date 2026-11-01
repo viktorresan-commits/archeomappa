@@ -1,0 +1,4 @@
+4ef57b583cfce48bad51bae2c2e0fc92ac505c9fb842a55dce4701814893a4b5  vendor/maplibre/LEGGIMI.txt
+ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2  vendor/maplibre/LICENSE.txt
+43c1d886b5fdf0aac4e7135bd6f84b823d9f48283a648012665f9be52c01389f  vendor/maplibre/maplibre-gl.css
+fc2b62cc13046714c8cd16350c71405567a02c7e6d16a4ba1542decb9edb0a03  vendor/maplibre/maplibre-gl.js

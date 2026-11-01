@@ -1,0 +1,4 @@
+MapLibre GL JS 5.7.0 (licenza BSD a 3 clausole, vedi LICENSE.txt).
+Copia non modificata di dist/maplibre-gl.js e dist/maplibre-gl.css dal rilascio v5.7.0
+(https://github.com/maplibre/maplibre-gl-js/releases/tag/v5.7.0).
+Serve alla vista 3D; viene caricata solo quando si tocca il pulsante «3D».

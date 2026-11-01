@@ -23,6 +23,8 @@ await mkdir(path.join(uscita, "vendor", "leaflet"), { recursive: true });
 
 for (const f of ["index.html", "manifest.json"]) await cp(path.join(radice, f), path.join(uscita, f));
 for (const d of ["css", "js", "icons"]) await cp(path.join(radice, d), path.join(uscita, d), { recursive: true });
+// MapLibre (vista 3D): copia nel repository, caricata solo al tocco del pulsante «3D»
+await cp(path.join(radice, "vendor", "maplibre"), path.join(uscita, "vendor", "maplibre"), { recursive: true });
 
 await cp(primoEsistente(leaflet, ["leaflet.js", "leaflet.min.js"]), path.join(uscita, "vendor/leaflet/leaflet.js"));
 await cp(primoEsistente(leaflet, ["leaflet.css", "leaflet.min.css"]), path.join(uscita, "vendor/leaflet/leaflet.css"));
