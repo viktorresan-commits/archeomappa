@@ -49,28 +49,60 @@ jobs:
                   return f"{im.width}x{im.height}, opaco {op:.0%}, grigi {min(vals) if vals else '-'}..{max(vals) if vals else '-'}"
               t = re.sub(r"<[^>]+>", " ", corpo.decode("utf8", "replace")); t = re.sub(r"\s+", " ", t).strip()
               return "TESTO: " + t[:400]
-          (b0, s) = tessera(43.3, 12.9, 15)
-          print("riquadro", b0)
-          # cerca tessere con dati: 12 tessere a est e a nord
-          print("--- GetMap come lo fa l'app: tessere vicine, 256 e 512 pixel")
-          for k in range(-3, 6):
-              b = (b0[0]+k*s, b0[1], b0[2]+k*s, b0[3])
-              r = {}
-              for px in (256, 512):
-                  st, tipo, corpo, dt = get(getmap(b, px))
-                  r[px] = f"{st} {dt:.1f}s {len(corpo)}B " + descrivi(corpo, tipo)
-              print(f"tessera {k:+d}:  256 → {r[256]}\n            512 → {r[512]}")
-          print("--- 12 richieste in parallelo")
+          def merc(lat, lon):
+              return lon*M/180, math.log(math.tan(math.pi/4+math.radians(lat)/2))*M/math.pi
+          def finestra(lat, lon, lato_m):
+              cx, cy = merc(lat, lon); k = 1/math.cos(math.radians(lat)); m = lato_m*k/2
+              return (cx-m, cy-m, cx+m, cy+m)
+          # 1) dove ci sono dati? scansione grossolana (finestre di 1 km, 24 px) sulle Marche
+          punti = [(43.95 - 0.05*i, 12.2 + 0.05*j) for i in range(28) for j in range(35)]
+          def opaco(pt):
+              st, tipo, corpo, dt = get(getmap(finestra(pt[0], pt[1], 1000), 24), 60)
+              if "image" not in tipo: return pt, -1
+              im = Image.open(io.BytesIO(corpo)).convert("RGBA")
+              return pt, sum(1 for v in im.getchannel("A").getdata() if v > 8)/(im.width*im.height)
+          t0 = time.time()
+          with ThreadPoolExecutor(16) as ex: ris = list(ex.map(opaco, punti))
+          print(f"scansione di {len(punti)} finestre in {time.time()-t0:.0f}s; con dati: {sum(1 for _,o in ris if o > 0.5)}; errori: {sum(1 for _,o in ris if o < 0)}")
+          for i in range(28):
+              print(f"{43.95-0.05*i:5.2f} " + "".join("#" if ris[i*35+j][1] > 0.5 else ("+" if ris[i*35+j][1] > 0.05 else ("!" if ris[i*35+j][1] < 0 else ".")) for j in range(35)))
+          print("      lon 12.2 → 13.9 (passo 0,05°)")
+          buoni = sorted((p for p, o in ris if o > 0.9), key=lambda p: (p[0]-43.337)**2 + (p[1]-12.905)**2)
+          if not buoni: raise SystemExit("nessuna finestra con dati")
+          lat, lon = buoni[0]
+          print(f"--- prove in {lat:.4f} N {lon:.4f} E (finestra con dati più vicina a Fabriano)")
+          bb = finestra(lat, lon, 1200)
+          imgs = {}
+          for px in (256, 512, 1000):
+              st, tipo, corpo, dt = get(getmap(bb, px))
+              print(f"GetMap {px} px: HTTP {st} {dt:.1f}s {len(corpo)} B → {descrivi(corpo, tipo)}")
+              if "image" in tipo: imgs[px] = Image.open(io.BytesIO(corpo)).convert("RGBA")
+          print("--- GetFeatureInfo e legame grigio ↔ quota (come calibra() dell'app)")
+          for px in (256, 512):
+              im = imgs[px]; w, h = im.size; g = im.convert("L").load(); a = im.getchannel("A").load()
+              celle = sorted(((g[c, r], c, r) for r in range(2, h-2, 7) for c in range(2, w-2, 7) if a[c, r] > 200))
+              scelte = [celle[int(i*(len(celle)-1)/8)] for i in range(9)]
+              cp = []
+              for (gv, c, r) in scelte:
+                  x = bb[0] + (c+0.5)*(bb[2]-bb[0])/w; y = bb[3] - (r+0.5)*(bb[3]-bb[1])/h
+                  st, tipo, corpo, dt = get(quota(x, y), 60)
+                  testo = re.sub(r"\s+", " ", corpo.decode("utf8", "replace")).strip()
+                  m = re.search(r"Stretched value;Pixel Value;\s*(-?[\d.]+);(-?[\d.]+);", testo)
+                  if m: cp.append((gv, float(m.group(2))))
+                  if len(cp) == 1 and m: print("   esempio di risposta:", testo[:200])
+              if len(cp) >= 5:
+                  n = len(cp); mx = sum(c[0] for c in cp)/n; my = sum(c[1] for c in cp)/n
+                  sxx = sum((c[0]-mx)**2 for c in cp); b = sum((c[0]-mx)*(c[1]-my) for c in cp)/sxx; a0 = my - b*mx
+                  ss = sum((c[1]-(a0+b*c[0]))**2 for c in cp); st_ = sum((c[1]-my)**2 for c in cp)
+                  print(f"{px} px: {n} punti, quota = {a0:.2f} + {b:.4f} × grigio, R² {1-ss/st_:.4f}  (grigi {cp[0][0]}..{cp[-1][0]})")
+              else:
+                  print(f"{px} px: solo {len(cp)} letture di quota valide su 9; ultima risposta: {testo[:200]}")
+          print("--- 12 tessere con dati in parallelo (256 e 512 px)")
+          bz, sz = tessera(lat, lon, 15)
           for px in (256, 512):
               t0 = time.time()
               with ThreadPoolExecutor(12) as ex:
-                  esiti = list(ex.map(lambda k: get(getmap((b0[0]+k*s, b0[1], b0[2]+k*s, b0[3]), px)), range(12)))
-              print(f"{px} px: totale {time.time()-t0:.1f}s; stati {sorted(set(e[0] for e in esiti))}; tempo max {max(e[3] for e in esiti):.1f}s")
-          print("--- GetFeatureInfo come lo fa l'app (3 prove per punto)")
-          for k in (0, 2, 4):
-              x = (b0[0]+b0[2])/2 + k*s; y = (b0[1]+b0[3])/2
-              for i in range(3):
-                  st, tipo, corpo, dt = get(quota(x, y), 60)
-                  print(f"punto {k} prova {i+1}: HTTP {st} {tipo.split(';')[0]} {dt:.1f}s → {descrivi(corpo, tipo)}")
+                  esiti = list(ex.map(lambda k: get(getmap((bz[0]+(k%4)*sz, bz[1]+(k//4)*sz, bz[2]+(k%4)*sz, bz[3]+(k//4)*sz), px)), range(12)))
+              print(f"{px} px: totale {time.time()-t0:.1f}s; stati {sorted(set(e[0] for e in esiti))}; tempo max {max(e[3] for e in esiti):.1f}s; byte {sum(len(e[2]) for e in esiti)//1024} KB")
           PY
           python3 prova.py
