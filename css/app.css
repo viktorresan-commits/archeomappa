@@ -253,7 +253,6 @@ ol.results { counter-reset: r; }
 .cmpetichetta { flex: 1 1 160px; font-size: 0.85rem; font-weight: 600; }
 
 /* vista 3D a schermo intero (MapLibre), caricata solo al tocco del pulsante «3D» */
-.quick .chip.tre-d { font-weight: 700; letter-spacing: 0.02em; border-color: var(--bosco); }
 .vista3d { position: fixed; inset: 0; z-index: 3000; background: #0b0f0d; display: flex; flex-direction: column; }
 .vista3d .mappa3d { position: relative; flex: 1 1 auto; min-height: 0; } /* con «.vista3d» davanti vince su «.maplibregl-map { position: relative }» della libreria */
 .barra3d {

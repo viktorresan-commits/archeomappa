@@ -1,0 +1,93 @@
+# Prova a mano (Actions → «Diagnosi mappe 2» → Run workflow): seconda parte.
+# 1) tessere di prova (base64 nel registro) per confrontare a occhio il satellite Esri e Esri Clarity attorno a Fabriano;
+# 2) GetMap vero dei servizi storici: Catasto Leopoldino (Toscana), Catasto 1858 (Alto Adige), ortofoto storiche e IGM 1:250.000 del Geoportale.
+name: Diagnosi mappe 2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prove
+        shell: bash
+        run: |
+          pip install --quiet pillow numpy 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import io, math, re, time, html, base64, traceback, urllib.request, urllib.error
+          from PIL import Image
+          UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+          M = 20037508.342789244
+          def get(url, t=60):
+              t0 = time.time()
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA, "Origin": "https://viktorresan-commits.github.io"}), timeout=t)
+                  return r.status, dict((k.lower(), v) for k, v in r.headers.items()), r.read(), time.time() - t0
+              except urllib.error.HTTPError as e:
+                  return e.code, dict((k.lower(), v) for k, v in e.headers.items()), e.read(), time.time() - t0
+              except Exception as e:
+                  return 0, {}, str(e).encode(), time.time() - t0
+          def testo(c, n=240):
+              t = html.unescape(re.sub(r"<[^>]+>", " ", c.decode("utf8", "replace"))); return re.sub(r"\s+", " ", t).strip()[:n]
+          def tile_di(lat, lon, z):
+              n = 2 ** z; return int((lon + 180) / 360 * n), int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n)
+          def merc(z, x, y):
+              s = 2 * M / 2 ** z; return (-M + x * s, M - (y + 1) * s, -M + (x + 1) * s, M - y * s)
+          def sezione(nome, f):
+              print("\n=== " + nome, flush=True)
+              try: f()
+              except Exception: print("ERRORE nella sezione:", traceback.format_exc()[-800:])
+          def immagine(nome, z, lat, lon, url):
+              x, y = tile_di(lat, lon, z); u = url.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))
+              st, h, b, s = get(u)
+              print("IMG %s z%d %d %s" % (nome, z, len(b), base64.b64encode(b).decode() if st == 200 else "ERR%s" % st), flush=True)
+          def campioni():
+              WI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              CL = "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              for (lat, lon, luogo) in [(43.360, 12.900, "bosco"), (43.3395, 12.9055, "citta")]:
+                  immagine("esri-%s" % luogo, 18, lat, lon, WI); immagine("clarity-%s" % luogo, 18, lat, lon, CL); immagine("esri-%s" % luogo, 19, lat, lon, WI)
+          sezione("1) tessere di prova per il confronto a occhio", campioni)
+          def esito(url):
+              st, h, b, s = get(url)
+              if st == 200 and h.get("content-type", "").startswith("image/"):
+                  im = Image.open(io.BytesIO(b)).convert("RGBA"); a = im.getchannel("A").point(lambda v: 255 if v > 8 else 0)
+                  frac = sum(1 for v in a.getdata() if v) / (im.width * im.height)
+                  return "immagine %dx%d, %d byte, con dati %d%%, CORS %s, %.1f s" % (im.width, im.height, len(b), round(100 * frac), h.get("access-control-allow-origin", "—"), s)
+              return "HTTP %d %s: %s" % (st, h.get("content-type", ""), testo(b))
+          def wms(base, versione, livelli, bb, px=256, crs="EPSG:3857"):
+              sep = "&" if "?" in base else "?"
+              nome = "SRS" if versione == "1.1.1" else "CRS"
+              return "%s%sSERVICE=WMS&VERSION=%s&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=true&LAYERS=%s&STYLES=&%s=%s&WIDTH=%d&HEIGHT=%d&BBOX=%s" % (base, sep, versione, livelli, nome, crs, px, px, ",".join("%.3f" % v for v in bb))
+          def castore():
+              base = "https://www502.regione.toscana.it/cartografia/wmsraster/com.rt.wms.RTmap/wms?map=wmscastore&"
+              st, h, b, s = get(base + "SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0")
+              t = b.decode("utf8", "replace")
+              for n, ti in re.findall(r"<Layer[^>]*>\s*<Name>([^<]+)</Name>\s*<Title>([^<]*)</Title>", t): print("   livello %s — %s" % (n, ti))
+              for liv in ("r_toscan_cst_fogli", "r_toscan_cst_riempimento_raster", "r_toscan_cst_sviluppi", "r_toscan_cst_inghirami", "r_toscan_cst_quadri_unione"):
+                  for z in (13, 15, 16, 17):
+                      x, y = tile_di(43.7696, 11.2558, z)  # Firenze
+                      print("CASTORE %-34s z%d 1.3.0: %s" % (liv, z, esito(wms(base, "1.3.0", liv, merc(z, x, y)))))
+          sezione("2a) Catasto storico della Toscana (CASTORE), Firenze", castore)
+          def altoadige():
+              base = "https://geoservices5.civis.bz.it/geoserver/ows"
+              for liv in ("p_bz-Cadastre-Historical:Cadastre1858", "p_bz-Cadastre-Historical:Cadastre1858-Map"):
+                  for z in (12, 14, 16, 17):
+                      x, y = tile_di(46.4983, 11.3548, z)  # Bolzano
+                      print("ALTO ADIGE %-44s z%d 1.3.0: %s" % (liv, z, esito(wms(base, "1.3.0", liv, merc(z, x, y)))))
+          sezione("2b) Catasto 1858 dell'Alto Adige, Bolzano", altoadige)
+          def pcn():
+              PCN = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/"
+              for mappa, fam in [("ortofoto_bn_88", "OI.ORTOIMMAGINI.1988"), ("ortofoto_bn_94", "OI.ORTOIMMAGINI.1994"), ("ortofoto_colore_00", "OI.ORTOIMMAGINI.2000"),
+                                 ("ortofoto_colore_06", "OI.ORTOIMMAGINI.2006"), ("ortofoto_colore_15", "OI.ORTOIMMAGINI.2015"), ("ortofoto_colore_12", "OI.ORTOIMMAGINI.2012")]:
+                  for z in (12, 14, 16, 17):
+                      x, y = tile_di(43.360, 12.900, z)
+                      print("%-18s %s.33 z%d 1.1.1/256: %s" % (mappa, fam, z, esito(wms(PCN + mappa + ".map", "1.1.1", fam + ".33", merc(z, x, y)))))
+              for z in (7, 8, 9, 10):
+                  x, y = tile_di(43.360, 12.900, z)
+                  print("IGM 1:250.000 CB.IGM250000.33 z%d: %s" % (z, esito(wms(PCN + "IGM_250000.map", "1.1.1", "CB.IGM250000.33", merc(z, x, y)))))
+                  print("IGM 1:100.000 MB.IGM100000.33 z%d: %s" % (z + 2, esito(wms(PCN + "IGM_100000.map", "1.1.1", "MB.IGM100000.33", merc(z + 2, *tile_di(43.360, 12.900, z + 2))))))
+          sezione("2c) Geoportale: ortofoto storiche e IGM", pcn)
+          PY
+          python3 prova.py 2>&1 | tee uscita.txt

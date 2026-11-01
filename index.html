@@ -294,7 +294,7 @@
         <!-- FONTI -->
         <div id="panel-library" class="panel" role="tabpanel" hidden>
           <h2>Biblioteca delle fonti</h2>
-          <p class="hint">Voci di Wikipedia, immagini di Wikimedia Commons, testi di Internet Archive ed Europeana (con chiave) su un luogo o attorno al centro.</p>
+          <p class="hint">Voci di Wikipedia, immagini di Wikimedia Commons, testi di Internet Archive su un luogo o attorno al centro.</p>
           <label class="field">Argomento o luogo
             <input id="libQuery" type="search" placeholder="Es. Tarquinia necropoli" autocomplete="off">
           </label>
@@ -357,13 +357,20 @@
           </details>
 
           <details class="box">
-            <summary>Chiavi e dati salvati</summary>
-            <label class="field">Chiave API Europeana (facoltativa)
-              <input id="setEuropeana" type="text" autocomplete="off" spellcheck="false" placeholder="Incolla la chiave"></label>
+            <summary>Dati salvati</summary>
             <div class="row">
               <button id="btnResetSettings" type="button" class="btn">Ripristina le impostazioni</button>
               <button id="btnClearCache" type="button" class="btn">Svuota i dati salvati</button>
             </div>
+          </details>
+
+          <details class="box">
+            <summary>Gesti sulla mappa</summary>
+            <ul class="plain">
+              <li><strong>Vista 3D</strong>: appoggia due dita sulla mappa e falle salire insieme, come per inclinarla (sul computer: tieni premuto Ctrl e trascina verso l'alto). Si apre il terreno in rilievo; per uscire tocca «✕ Chiudi 3D» o il tasto Indietro.</li>
+              <li><strong>Coordinate e Google Maps</strong>: tieni premuto un punto per circa mezzo secondo.</li>
+              <li><strong>Zoom</strong>: pizzica con due dita o usa + e −.</li>
+            </ul>
           </details>
 
           <details class="box">
@@ -379,7 +386,7 @@
               <li>Mappe e siti: © collaboratori di OpenStreetMap (ODbL)</li>
               <li>Rilievo di base: OpenTopoMap, Esri. DTM caricati dall'utente (es. TINITALY, INGV, CC BY 4.0; PST, MASE): vale la licenza del file</li>
               <li>Voci e immagini: Wikipedia e Wikimedia Commons, licenze indicate caso per caso</li>
-              <li>Testi: Internet Archive; oggetti: Europeana</li>
+              <li>Testi: Internet Archive</li>
               <li>Servizi WMS: Geoportale Nazionale (MASE), Agenzia delle Entrate, secondo le rispettive licenze</li>
             </ul>
           </details>

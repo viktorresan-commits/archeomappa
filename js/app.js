@@ -6,7 +6,7 @@ import { calcolaZone, primeZone, zoneInGeoJSON, PARAMETRI_BASE } from "./potenti
 import { EPOCHE, profilo } from "./epochs.js";
 import {
   CATEGORIE, cercaSitiOSM, cercaLuogo, caricaCapabilities, urlCapabilities,
-  wikipediaVicino, wikipediaCerca, commonsCerca, commonsVicino, archiveCerca, europeanaCerca,
+  wikipediaVicino, wikipediaCerca, commonsCerca, commonsVicino, archiveCerca,
 } from "./sources.js";
 import {
   BASI, SOVRAPPOSIZIONI, SERVIZI_NOTI, creaLivello, risolviLivelli, urlRegione, prodottiRegione,
@@ -21,6 +21,7 @@ import { creaConfrontoLivelli } from "./tendina.js";
 import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
 import { decidiSpegniTutto, ricordatiValidi } from "./interruttore.js";
 import { base3dDa2d, zoomLeaflet as zoomDa3d } from "./stile3d.js";
+import { collegaGestoInclina, inclinazioneIniziale } from "./gesto-inclina.js";
 
 const VERSIONE = "0.6.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
@@ -31,7 +32,7 @@ const SETTE_GIORNI = 7 * 24 * 3600 * 1000;
 
 // ------------------------------------------------------------ impostazioni
 
-const IMP_BASE = { modo: "ente", wNear: 30, wMean: 25, wTri: 25, wDens: 20, low: 0.25, high: 0.55, buffer: 700, europeana: "" };
+const IMP_BASE = { modo: "ente", wNear: 30, wMean: 25, wTri: 25, wDens: 20, low: 0.25, high: 0.55, buffer: 700 };
 let imp = { ...IMP_BASE, ...mem.get("am.imp", {}) };
 const salvaImp = () => mem.set("am.imp", imp);
 
@@ -618,7 +619,6 @@ function disegnaRapidi() {
   const rapidi = [...sovr.values()].filter((r) => r.def.rapido);
   const nomeBase = BASE_BREVE[baseAttiva] ?? baseAttiva;
   barra.replaceChildren(
-    h("button", { type: "button", class: "chip tre-d", title: "Vista 3D del terreno con le altezze", "aria-label": "Apri la vista 3D del terreno", onclick: apri3D }, "3D"),
     h("button", { type: "button", class: "chip", title: "Scegli la mappa di base", "aria-label": `Mappa di base: ${nomeBase}. Tocca per sceglierne un'altra`, onclick: scegliBase }, `Base: ${nomeBase}`),
     ...rapidi.map((r) => {
       const fuori = r.on && r.def.minZoom && z < r.def.minZoom;
@@ -642,18 +642,19 @@ function disegnaRapidi() {
 // ------------------------------------------- vista 3D del terreno (MapLibre, caricata solo al tocco di «3D»)
 
 let aprendo3d = false;
-async function apri3D() {
+async function apri3D({ centro, zoom, inclinazione } = {}) {
   if (aprendo3d) return;
   aprendo3d = true;
   try {
     if (sessioneConfronto && !confrontoOccupato) await fermaConfronto();
     toast("Apro la vista 3D…");
     const { apriVista3D } = await import("./vista3d.js");
-    const c = map.getCenter();
+    const c = centro ?? map.getCenter();
     const lidar = sovr.get("lidar");
     await apriVista3D({
       centro: [c.lat, c.lng],
-      zoom: map.getZoom(),
+      zoom: zoom ?? map.getZoom(),
+      inclinazione,
       base: base3dDa2d(baseAttiva),
       ombre: true,
       lidar: lidar?.on && lidar.urlEffettivo && lidar.livelliEffettivi ? { url: lidar.urlEffettivo, livelli: lidar.livelliEffettivi, versione: lidar.def.versione ?? "1.1.1" } : null,
@@ -666,6 +667,22 @@ async function apri3D() {
     aprendo3d = false;
   }
 }
+
+// La vista 3D si apre inclinando la mappa: due dita che salgono insieme (sul computer: Ctrl + trascinamento verso l'alto).
+// Si apre dal punto e dall'ingrandimento che la mappa aveva quando le dita si sono appoggiate.
+let appoggio = null;
+$("map").addEventListener("touchstart", (ev) => { if (ev.touches.length === 2) appoggio = { c: map.getCenter(), z: map.getZoom(), t: Date.now() }; }, { passive: true });
+collegaGestoInclina($("map"), (g) => {
+  const a = appoggio && Date.now() - appoggio.t < 15000 ? appoggio : null;
+  appoggio = null;
+  apri3D({ centro: a?.c, zoom: a?.z, inclinazione: inclinazioneIniziale(g.spostamento) });
+});
+// Il gesto non ha un pulsante: lo si ricorda una volta sola, quando si guarda il terreno da vicino.
+map.on("zoomend", () => {
+  if (map.getZoom() < 13 || mem.get("am.suggerimento3d", false) || document.querySelector(".vista3d")) return;
+  mem.set("am.suggerimento3d", true);
+  toast("Vista 3D: inclina la mappa con due dita insieme verso l'alto.", 7000);
+});
 
 // ------------------------------------------- confronto a mano fra due livelli (cursore a tendina, lampeggio)
 
@@ -1436,7 +1453,7 @@ async function cercaFonti(vicino) {
   if (vicino) c = ottieniCentro();
   else if (!q) { toast("Scrivi un argomento o un luogo da cercare."); return; }
   const raggio = Math.min(10000, Number($("nearRadius").value) * 1000);
-  const chiave = vicino ? `fonti:vicino:${c.lat.toFixed(3)},${c.lon.toFixed(3)}:${raggio}` : `fonti:testo:${q.toLowerCase()}:${imp.europeana ? "e" : ""}`;
+  const chiave = vicino ? `fonti:vicino:${c.lat.toFixed(3)},${c.lon.toFixed(3)}:${raggio}` : `fonti:testo:${q.toLowerCase()}`;
   const btn = vicino ? $("btnLibPin") : $("btnLib");
   occupato(btn, true);
   stato("libStatus", "Interrogo le fonti…");
@@ -1453,7 +1470,7 @@ async function cercaFonti(vicino) {
     }
     const lavori = vicino
       ? [["Wikipedia", wikipediaVicino(c.lat, c.lon, raggio)], ["Wikimedia Commons", commonsVicino(c.lat, c.lon, raggio)]]
-      : [["Wikipedia", wikipediaCerca(q)], ["Wikimedia Commons", commonsCerca(q)], ["Internet Archive", archiveCerca(q)], ...(imp.europeana ? [["Europeana", europeanaCerca(q, imp.europeana)]] : [])];
+      : [["Wikipedia", wikipediaCerca(q)], ["Wikimedia Commons", commonsCerca(q)], ["Internet Archive", archiveCerca(q)]];
     const esiti = await Promise.allSettled(lavori.map((l) => l[1]));
     const falliti = [];
     fonti = [];
@@ -1465,7 +1482,6 @@ async function cercaFonti(vicino) {
     if (fonti.length) await cacheScrivi(chiave, fonti);
     const parti = [`${fonti.length} risultati`];
     if (falliti.length) parti.push(`non hanno risposto: ${falliti.join(", ")}`);
-    if (!imp.europeana && !vicino) parti.push("per Europeana serve una chiave (sezione Info)");
     stato("libStatus", frase(parti), !!falliti.length && !fonti.length);
   } catch (e) {
     stato("libStatus", `Ricerca non riuscita: ${messaggioErrore(e)}.`, true);
@@ -1502,7 +1518,6 @@ function mostraImp() {
   $("setLow").value = imp.low;
   $("setHigh").value = imp.high;
   $("setBuffer").value = imp.buffer;
-  $("setEuropeana").value = imp.europeana;
   $("btnZones").disabled = pubblica();
   aggiornaTestoCentro();
 }
@@ -1535,7 +1550,6 @@ function iniziaImp() {
   numero("setLow", "low", 0, 1);
   numero("setHigh", "high", 0, 1);
   numero("setBuffer", "buffer", 0, 3000);
-  $("setEuropeana").addEventListener("change", (e) => { imp.europeana = e.target.value.trim(); salvaImp(); });
   $("btnResetSettings").addEventListener("click", () => { imp = { ...IMP_BASE }; salvaImp(); mostraImp(); toast("Impostazioni ripristinate."); });
   $("btnClearCache").addEventListener("click", async () => { await cacheSvuota(); toast("Dati salvati cancellati."); });
 }

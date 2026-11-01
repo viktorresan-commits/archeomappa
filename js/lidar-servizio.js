@@ -14,6 +14,7 @@
 
 import { mercatoreDiretta, creaProiezione } from "./proj.js";
 import { completaMeta } from "./raster.js";
+import { testoDaHtml } from "./testo.js";
 
 export class ErroreServizio extends Error {
   constructor(messaggio, { dimensione = false } = {}) {
@@ -239,7 +240,7 @@ const clienteNativo = (win) => (win.Capacitor?.isNativePlatform?.() ? win.Capaci
 const MSG_CORS = "Da una pagina web non riesco a leggere i pixel del servizio del Ministero (il browser non lo consente). Usa l'app Android oppure imposta il proxy nel pannello Livelli.";
 
 /** Testo di una risposta, senza tag, abbreviato per essere mostrato all'utente. */
-const breve = (byte) => new TextDecoder().decode(byte.slice(0, 700)).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+const breve = (byte) => testoDaHtml(new TextDecoder().decode(byte.slice(0, 700)), 240);
 
 /**
  * Scarica un'immagine e ne restituisce i pixel. Nell'app Android usa il client HTTP nativo (nessun

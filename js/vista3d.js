@@ -160,12 +160,12 @@ let aperta = null; // {mappa, chiudi}
 
 /**
  * Apre la vista 3D a schermo intero sopra l'app.
- * opzioni: {centro: [lat, lon], zoom (Leaflet), base (id della base 2D), ombre, lidar: {url, livelli, versione}|null, bearing,
+ * opzioni: {centro: [lat, lon], zoom (Leaflet), base (id della base 2D), ombre, lidar: {url, livelli, versione}|null, bearing, inclinazione (gradi, 62),
  *           alChiudere({lat, lon, zoom (Leaflet)}), toast(msg)}
  */
 export async function apriVista3D(opzioni) {
   if (aperta) return aperta;
-  const { centro, zoom = 14, base = "sat", ombre = true, lidar = null, bearing = 0, alChiudere = () => {}, toast = () => {}, radice = document.body } = opzioni;
+  const { centro, zoom = 14, base = "sat", ombre = true, lidar = null, bearing = 0, inclinazione = 62, alChiudere = () => {}, toast = () => {}, radice = document.body } = opzioni;
   if (!haWebGL2()) { toast("Questo dispositivo non supporta il 3D (serve WebGL 2)."); return null; }
   const velo = h("div", { class: "vista3d", role: "dialog", "aria-modal": "true", "aria-label": "Vista 3D del terreno" });
   const stato = h("span", { class: "stato3d", role: "status", "aria-live": "polite" }, "Carico la vista 3D…");
@@ -205,7 +205,7 @@ export async function apriVista3D(opzioni) {
     style: costruisciStile(st),
     center: [centro[1], centro[0]],
     zoom: Math.max(8, Math.min(16.5, zoomMapLibre(zoom))),
-    pitch: 62, bearing, maxPitch: 85, minZoom: 5, maxZoom: 19,
+    pitch: Math.max(0, Math.min(85, Number(inclinazione) || 62)), bearing, maxPitch: 85, minZoom: 5, maxZoom: 19,
     maxParallelImageRequests: 8,
     attributionControl: false,
     canvasContextAttributes: { antialias: true },

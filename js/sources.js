@@ -1,5 +1,5 @@
 // Fonti dati: OpenStreetMap (Overpass), Nominatim, Wikipedia/Commons, Internet Archive,
-// Europeana e lettura dei GetCapabilities WMS. Le funzioni "parse*" sono pure e testabili.
+// lettura dei GetCapabilities WMS. Le funzioni "parse*" sono pure e testabili.
 
 import { classifica, dominante, epocaDaAnno } from "./epochs.js";
 import { prendi, soloTesto, tronca, urlSicuro, cacheLeggi, cacheScrivi, fetchNativo } from "./util.js";
@@ -306,21 +306,6 @@ export async function archiveCerca(q, { impl } = {}) {
       titolo: String(Array.isArray(d.title) ? d.title[0] : d.title ?? d.identifier),
       testo: [d.creator && (Array.isArray(d.creator) ? d.creator.join(", ") : d.creator), d.year].filter(Boolean).join(" · "),
       url: `https://archive.org/details/${encodeURIComponent(d.identifier)}`,
-    }),
-  );
-}
-
-export async function europeanaCerca(q, chiave, { impl } = {}) {
-  if (!chiave) return [];
-  const url = `https://api.europeana.eu/record/v2/search.json?wskey=${encodeURIComponent(chiave)}&query=${encodeURIComponent(q)}&rows=15&profile=standard`;
-  const j = await prendi(url, { impl });
-  return (j?.items ?? []).map((it) =>
-    voce({
-      fonte: "Europeana",
-      titolo: String(it.title?.[0] ?? "Senza titolo"),
-      testo: [it.dcCreator?.[0], it.year?.[0], it.dataProvider?.[0]].filter(Boolean).join(" · "),
-      url: it.guid,
-      immagine: it.edmPreview?.[0],
     }),
   );
 }

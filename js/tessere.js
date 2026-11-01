@@ -5,8 +5,10 @@
 // Nell'app Android si può riprovare con il client nativo, che aggira i blocchi del WebView e permette di
 // leggere la risposta del servizio: così, quando c'è un errore del servizio, lo si riporta com'è.
 
+import { testoDaHtml } from "./testo.js";
+
 const daBase64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-const brevi = (testo) => String(testo).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+const brevi = (testo) => testoDaHtml(testo, 220);
 
 export const clienteNativo = (win = globalThis) => (win.Capacitor?.isNativePlatform?.() ? win.Capacitor.Plugins?.CapacitorHttp ?? null : null);
 
