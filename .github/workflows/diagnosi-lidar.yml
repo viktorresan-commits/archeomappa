@@ -1,5 +1,6 @@
 # Prova a mano (Actions → «Diagnosi LiDAR» → Run workflow): interroga il servizio LiDAR del Ministero
-# con richieste da 256, 512 e 1000 pixel e scrive tempi, tipo di risposta e dimensioni. Non tocca l'app.
+# con le stesse richieste dell'app (GetMap da 256, 512 e 1000 pixel; GetFeatureInfo per le quote in metri)
+# e scrive tempi, tipo di risposta e contenuto. Non tocca l'app.
 name: Diagnosi LiDAR
 on:
   workflow_dispatch:
@@ -13,45 +14,63 @@ jobs:
       - name: Richieste GetMap e GetFeatureInfo
         shell: bash
         run: |
-          set -u
-          BASE='http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map'
-          LIV='EL.LIDAR.MARCHE.1x1.DTM'
-          # tessera 3857 a zoom 15 attorno a 43,3 N 12,9 E; riquadro = una tessera, poi 2x2 tessere
-          python3 - <<'PY' > bbox.txt
-          import math
-          lat, lon, z = 43.3, 12.9, 15
-          n = 2**z
-          x = int((lon+180)/360*n); y = int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
-          M = 20037508.342789244; s = 2*M/n
-          for k in (1, 2):
-              x0 = -M + x*s; y1 = M - y*s
-              print(f"{x0} {y1-k*s} {x0+k*s} {y1}")
+          pip install --quiet pillow 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import io, math, re, time, urllib.request, urllib.error
+          from concurrent.futures import ThreadPoolExecutor
+          from PIL import Image
+          BASE = "http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/servizi-LiDAR/LIDAR_MARCHE.map"
+          LIV = "EL.LIDAR.MARCHE.1x1.DTM"
+          M = 20037508.342789244
+          def tessera(lat, lon, z):
+              n = 2**z
+              x = int((lon+180)/360*n); y = int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
+              s = 2*M/n
+              return (-M+x*s, M-(y+1)*s, -M+(x+1)*s, M-y*s), s
+          def get(url, t=90):
+              t0 = time.time()
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"}), timeout=t)
+                  return r.status, r.headers.get("Content-Type", ""), r.read(), time.time()-t0
+              except urllib.error.HTTPError as e:
+                  return e.code, e.headers.get("Content-Type", ""), e.read(), time.time()-t0
+              except Exception as e:
+                  return 0, "", str(e).encode(), time.time()-t0
+          def getmap(bbox, px):
+              return f"{BASE}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS={LIV}&STYLES=&SRS=EPSG:3857&BBOX={','.join('%.3f' % v for v in bbox)}&WIDTH={px}&HEIGHT={px}&FORMAT=image/png&TRANSPARENT=true"
+          def quota(x, y):
+              b = ",".join("%.3f" % v for v in (x-1.5, y-1.5, x+1.5, y+1.5))
+              return f"{BASE}&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS={LIV}&QUERY_LAYERS={LIV}&STYLES=&SRS=EPSG:3857&BBOX={b}&WIDTH=3&HEIGHT=3&X=1&Y=1&INFO_FORMAT=text/plain"
+          def descrivi(corpo, tipo):
+              if "image" in tipo:
+                  im = Image.open(io.BytesIO(corpo)).convert("RGBA"); a = im.getchannel("A"); g = im.convert("L")
+                  op = sum(1 for v in a.getdata() if v > 8) / (im.width*im.height)
+                  vals = [p for p, v in zip(g.getdata(), a.getdata()) if v > 8]
+                  return f"{im.width}x{im.height}, opaco {op:.0%}, grigi {min(vals) if vals else '-'}..{max(vals) if vals else '-'}"
+              t = re.sub(r"<[^>]+>", " ", corpo.decode("utf8", "replace")); t = re.sub(r"\s+", " ", t).strip()
+              return "TESTO: " + t[:400]
+          (b0, s) = tessera(43.3, 12.9, 15)
+          print("riquadro", b0)
+          # cerca tessere con dati: 12 tessere a est e a nord
+          print("--- GetMap come lo fa l'app: tessere vicine, 256 e 512 pixel")
+          for k in range(-3, 6):
+              b = (b0[0]+k*s, b0[1], b0[2]+k*s, b0[3])
+              r = {}
+              for px in (256, 512):
+                  st, tipo, corpo, dt = get(getmap(b, px))
+                  r[px] = f"{st} {dt:.1f}s {len(corpo)}B " + descrivi(corpo, tipo)
+              print(f"tessera {k:+d}:  256 → {r[256]}\n            512 → {r[512]}")
+          print("--- 12 richieste in parallelo")
+          for px in (256, 512):
+              t0 = time.time()
+              with ThreadPoolExecutor(12) as ex:
+                  esiti = list(ex.map(lambda k: get(getmap((b0[0]+k*s, b0[1], b0[2]+k*s, b0[3]), px)), range(12)))
+              print(f"{px} px: totale {time.time()-t0:.1f}s; stati {sorted(set(e[0] for e in esiti))}; tempo max {max(e[3] for e in esiti):.1f}s")
+          print("--- GetFeatureInfo come lo fa l'app (3 prove per punto)")
+          for k in (0, 2, 4):
+              x = (b0[0]+b0[2])/2 + k*s; y = (b0[1]+b0[3])/2
+              for i in range(3):
+                  st, tipo, corpo, dt = get(quota(x, y), 60)
+                  print(f"punto {k} prova {i+1}: HTTP {st} {tipo.split(';')[0]} {dt:.1f}s → {descrivi(corpo, tipo)}")
           PY
-          read -r A0 B0 A1 B1 < <(sed -n 1p bbox.txt)
-          read -r C0 D0 C1 D1 < <(sed -n 2p bbox.txt)
-          echo "riquadro tessera: $A0,$B0,$A1,$B1"
-          prova() { # nome, larghezza, bbox
-            local nome="$1" px="$2" bbox="$3"
-            local url="$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=$LIV&STYLES=&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=$px&HEIGHT=$px&BBOX=$bbox"
-            curl -sS -m 90 -o "$nome.out" -w "$nome: HTTP %{http_code}, %{content_type}, %{size_download} byte, %{time_total} s\n" "$url" || echo "$nome: curl fallito ($?)"
-            head -c 200 "$nome.out" | tr -c '[:print:]\n' '.' | head -3
-          }
-          for px in 256 512 1000; do prova "tessera-$px" "$px" "$A0,$B0,$A1,$B1"; done
-          prova "quadrato-2x2-1000" 1000 "$C0,$D0,$C1,$D1"
-          echo "--- 12 tessere in parallelo, da 256 e da 512 pixel"
-          for px in 256 512; do
-            start=$(date +%s.%N)
-            for i in $(seq 1 12); do
-              dx=$(python3 -c "print($A1-($A0)) if False else print(($A1-($A0))*$i*0)")
-              ( curl -sS -m 90 -o "par-$px-$i.out" -w "%{http_code} %{size_download} %{time_total}\n" "$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=$LIV&STYLES=&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:3857&WIDTH=$px&HEIGHT=$px&BBOX=$(python3 -c "
-          a0,b0,a1,b1=$A0,$B0,$A1,$B1
-          w=a1-a0
-          print(f'{a0+w*$i},{b0},{a1+w*$i},{b1}')")" > "par-$px-$i.log" 2>&1 ) &
-            done
-            wait
-            end=$(date +%s.%N)
-            echo "px=$px: totale $(echo "$end - $start" | bc) s"
-            cat par-$px-*.log | sort | uniq -c | head -15
-          done
-          echo "--- GetFeatureInfo"
-          curl -sS -m 60 "$BASE&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=$LIV&QUERY_LAYERS=$LIV&STYLES=&FORMAT=image/png&SRS=EPSG:3857&WIDTH=101&HEIGHT=101&BBOX=$A0,$B0,$A1,$B1&X=50&Y=50&INFO_FORMAT=text/plain" | head -20
+          python3 prova.py
