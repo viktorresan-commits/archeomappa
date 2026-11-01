@@ -14,8 +14,9 @@ import {
 } from "./layers.js";
 import { h, meta, mem, inCsv, scarica, urlSicuro, cacheLeggi, cacheScrivi, cacheSvuota } from "./util.js";
 import { iniziaRilievo } from "./rilievo-ui.js";
-import { aggiungiRipiegoNativo, provaTessera } from "./tessere.js";
-import { variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva } from "./varianti.js";
+import { provaTessera } from "./tessere.js";
+import { rendiRobusto } from "./tessere-robuste.js";
+import { variantiConPreferita, scegliVariante, fusoCambiato, zoomDiProva, urlConVariante } from "./varianti.js";
 import { ordineIniziale, spostaLivello, zIndexDi } from "./ordine.js";
 import { creaConfrontoLivelli } from "./tendina.js";
 import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
@@ -357,6 +358,13 @@ function messaggioVarianti(r) {
   return `«${r.def.nome}»: nessuno dei ${n} formati di richiesta provati ha restituito un'immagine.${primo ? ` Messaggio del servizio: ${primo}.` : ""} Tocca «Perché non si vede?» per l'elenco completo.`;
 }
 
+/** Per le ortofoto/IGM a più formati: la stessa tessera chiesta con gli altri formati (al massimo due, diversi dal corrente). */
+function urlAlternativiVariante(r, url) {
+  const correnti = r.variante?.livelli;
+  const altre = variantiConPreferita(r.def.famiglia, map.getCenter().lng, r.variante?.id).filter((v) => v.livelli !== correnti);
+  return altre.slice(0, 2).map((v) => urlConVariante(url, v));
+}
+
 async function costruisciLivelloSovr(r) {
   const d = r.def;
   if (d.tipo === "wms-regione") {
@@ -377,7 +385,7 @@ async function costruisciLivelloSovr(r) {
   layer.setZIndex(zIndexDi(ordineSovr, d.id));
   if (d.tipo !== "tile") {
     r.ok = 0; r.nativo = 0; r.messaggio = r.messaggio ?? "";
-    aggiungiRipiegoNativo(layer, { win: window, stato: r });
+    rendiRobusto(layer, { win: window, stato: r, alternative: r.def.famiglia ? (url) => urlAlternativiVariante(r, url) : null });
     layer.on("tileerror", () => {
       // un solo avviso per livello: zoomando i fallimenti si ripetono e un messaggio a ogni zoom disturba soltanto
       if (++r.errori >= 4 && !r.avvisato) {

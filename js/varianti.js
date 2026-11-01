@@ -57,3 +57,21 @@ export function zoomDiProva(zMappa, { minZoom = 0, maxNativeZoom = 19 } = {}, te
   for (let k = 1; k <= tentativiInPiu && z0 + k <= maxNativeZoom; k++) zoom.push(z0 + k);
   return zoom;
 }
+
+/**
+ * Stessa richiesta GetMap con il formato di un'altra variante: cambiano i livelli, la versione e il nome del parametro
+ * del sistema di riferimento (SRS in 1.1.1, CRS in 1.3.0). Il riquadro resta lo stesso: in EPSG:3857 l'ordine degli assi
+ * è lo stesso in entrambe le versioni.
+ */
+export function urlConVariante(url, v) {
+  const u = new URL(url);
+  const chiave = (k) => [...u.searchParams.keys()].find((x) => x.toLowerCase() === k);
+  const leggi = (k) => { const c = chiave(k); return c ? u.searchParams.get(c) : null; };
+  const togli = (k) => { const c = chiave(k); if (c) u.searchParams.delete(c); };
+  const sistema = leggi("srs") ?? leggi("crs") ?? "EPSG:3857";
+  togli("layers"); togli("version"); togli("srs"); togli("crs");
+  u.searchParams.set("LAYERS", v.livelli);
+  u.searchParams.set("VERSION", v.versione);
+  u.searchParams.set(v.versione === "1.1.1" ? "SRS" : "CRS", sistema);
+  return u.href;
+}
