@@ -1,0 +1,98 @@
+# Prova a mano (Actions → «Diagnosi 3D vuoti» → Run workflow): terza parte della prova delle fonti di quota.
+# Dove sono i pixel «senza dato» (-9999) nelle tessere di TINITALY, se le tessere vicine combaciano ai bordi,
+# se la risposta viaggia compressa e com'è fatta l'intestazione del GeoTIFF (per leggerlo nel browser).
+name: Diagnosi 3D vuoti
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prove
+        shell: bash
+        run: |
+          pip install --quiet pillow numpy tifffile imagecodecs 2>&1 | tail -1
+          cat > prova.py <<'PY'
+          import gzip, io, math, re, time, traceback, urllib.request, urllib.error
+          import numpy as np
+          import tifffile
+          UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+          M = 20037508.342789244
+          def get(url, t=120, intest=None):
+              h = {"User-Agent": UA}
+              if intest: h.update(intest)
+              t0 = time.time()
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=t)
+                  return r.status, dict((k.lower(), v) for k, v in r.headers.items()), r.read(), time.time()-t0
+              except urllib.error.HTTPError as e:
+                  return e.code, dict((k.lower(), v) for k, v in e.headers.items()), e.read(), time.time()-t0
+              except Exception as e:
+                  return 0, {}, str(e).encode(), time.time()-t0
+          def sezione(nome, f):
+              print(f"\n=== {nome}")
+              try: return f()
+              except Exception: print("ERRORE nella sezione:", traceback.format_exc()[-700:])
+          def merc_bbox(z, x, y):
+              s = 2*M/2**z; return (-M+x*s, M-(y+1)*s, -M+(x+1)*s, M-y*s)
+          def tile(lat, lon, z):
+              n = 2**z; return int((lon+180)/360*n), int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
+          T = "https://tinitaly.pi.ingv.it/TINItaly_1_1/wcs"
+          def url(bb, w, h, crs="EPSG:3857"):
+              return f"{T}?service=WCS&version=1.0.0&request=GetCoverage&coverage=TINItaly_1_1:tinitaly_dem&crs={crs}&bbox={','.join('%.6f' % v for v in bb)}&width={w}&height={h}&format=GeoTIFF"
+          def tif(c):
+              with tifffile.TiffFile(io.BytesIO(c)) as t:
+                  return t.pages[0].asarray(), t.pages[0]
+          def intestazione():
+              z = 13; x, y = tile(43.337, 12.905, z)
+              st, h, c, dt = get(url(merc_bbox(z, x, y), 384, 384), 120, {"Accept-Encoding": "gzip, deflate, br"})
+              print("risposta:", st, "| content-encoding:", h.get("content-encoding"), "| content-length:", h.get("content-length"), "| byte letti:", len(c), "| content-type:", h.get("content-type"), "| ACAO:", h.get("access-control-allow-origin"), "| cache-control:", h.get("cache-control"), "| etag/last-modified:", h.get("etag"), h.get("last-modified"))
+              raw = gzip.decompress(c) if h.get("content-encoding") == "gzip" else c
+              print("byte dopo la decompressione:", len(raw), "(float32 384x384 = %d)" % (384*384*4))
+              a, p = tif(raw)
+              print("ordine byte:", p.parent.byteorder, "| dtype", a.dtype, "| forma", a.shape, "| compressione", int(p.compression), "| predittore", int(p.predictor), "| campioni/pixel", p.samplesperpixel)
+              print("righe per striscia:", p.rowsperstrip, "| strisce:", len(p.dataoffsets), "| primo offset:", p.dataoffsets[0], "| byte primo blocco:", p.databytecounts[0], "| pianare:", int(p.planarconfig))
+              for tg in p.tags.values():
+                  print("  tag", tg.code, tg.name, "=", str(tg.value)[:130])
+              print("intestazione (hex, 200 byte):", raw[:200].hex())
+          sezione("Intestazione e compressione della risposta", intestazione)
+          def mappa_vuoti(nome, lat, lon, z=13, px=384):
+              x, y = tile(lat, lon, z)
+              st, h, c, dt = get(url(merc_bbox(z, x, y), px, px))
+              if st != 200 or c[:2] not in (b"MM", b"II"):
+                  print(f"{nome}: HTTP {st} → {c[:200]!r}"); return None
+              a, p = tif(c); nd = a <= -9998
+              print(f"{nome} (z{z} {x}/{y}): senza dato {nd.mean():.1%}; quote {a[~nd].min():.0f}..{a[~nd].max():.0f}" if (~nd).any() else f"{nome}: tutto senza dato")
+              g = 24; s = px // g
+              for r in range(g):
+                  print("   " + "".join("#" if nd[r*s:(r+1)*s, c_*s:(c_+1)*s].mean() > 0.5 else ("+" if nd[r*s:(r+1)*s, c_*s:(c_+1)*s].any() else ".") for c_ in range(g)))
+              bordi = {"alto": nd[0].mean(), "basso": nd[-1].mean(), "sinistra": nd[:, 0].mean(), "destra": nd[:, -1].mean()}
+              print("   fascia di 1 pixel ai bordi senza dato:", {k: f"{v:.0%}" for k, v in bordi.items()})
+              return a
+          def vuoti():
+              for nome, lat, lon in [("Fabriano campagna", 43.337, 12.905), ("Monte Catria", 43.474, 12.697), ("Ancona e mare", 43.62, 13.50), ("Roma", 41.90, 12.50), ("Dolomiti", 46.50, 11.80), ("Sicilia interna", 37.50, 14.20), ("Croazia (fuori Italia)", 45.0, 15.0)]:
+                  mappa_vuoti(nome, lat, lon)
+          sezione("Dove sono i pixel senza dato", vuoti)
+          def vicine():
+              z = 13; x, y = tile(43.337, 12.905, z)
+              a = tif(get(url(merc_bbox(z, x, y), 384, 384))[2])[0]
+              b = tif(get(url(merc_bbox(z, x+1, y), 384, 384))[2])[0]
+              c = tif(get(url(merc_bbox(z, x, y+1), 384, 384))[2])[0]
+              ok = (a[:, -1] > -9998) & (b[:, 0] > -9998)
+              d = (a[:, -1] - b[:, 0])[ok]; print(f"bordo destro di A − bordo sinistro di B: {ok.sum()} righe valide, differenza media {d.mean():+.2f} m, massima {np.abs(d).max():.2f} m")
+              ok = (a[-1] > -9998) & (c[0] > -9998)
+              d = (a[-1] - c[0])[ok]; print(f"bordo basso di A − bordo alto di C: {ok.sum()} colonne valide, differenza media {d.mean():+.2f} m, massima {np.abs(d).max():.2f} m")
+              # stessa zona con 8 pixel di margine, poi ritagliata
+              bb = merc_bbox(z, x, y); w = (bb[2]-bb[0]); m = w*8/384
+              big = tif(get(url((bb[0]-m, bb[1]-m, bb[2]+m, bb[3]+m), 400, 400))[2])[0]
+              mid = big[8:-8, 8:-8]
+              nd0 = (a <= -9998); nd1 = (mid <= -9998)
+              ok = ~nd0 & ~nd1
+              print(f"con 8 px di margine: senza dato {nd1.mean():.1%} (senza margine {nd0.mean():.1%}); differenza sui punti comuni media {np.abs(big[8:-8,8:-8]-a)[ok].mean():.2f} m")
+          sezione("Le tessere vicine combaciano?", vicine)
+          print("\nfine")
+          PY
+          python3 prova.py
