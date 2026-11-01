@@ -1,7 +1,7 @@
 // Service worker: guscio dell'app in cache (funziona senza rete), tessere delle mappe
 // viste di recente, aggiornamento in sottofondo. Le chiamate alle API non vengono toccate.
 
-const VERSIONE = "am-v10";
+const VERSIONE = "am-v11";
 const CACHE_GUSCIO = `${VERSIONE}-guscio`;
 const CACHE_TESSERE = `${VERSIONE}-tessere`;
 const MAX_TESSERE = 500;
@@ -9,7 +9,7 @@ const MAX_TESSERE = 500;
 const GUSCIO = [
   "./", "index.html", "manifest.json", "css/app.css",
   "js/app.js", "js/geo.js", "js/potential.js", "js/epochs.js", "js/sources.js", "js/layers.js", "js/util.js",
-  "js/rilievo-ui.js", "js/lidar-servizio.js", "js/tessere.js", "js/motore.js", "js/worker-rilievo.js", "js/analisi.js", "js/raster.js", "js/proj.js", "js/visual.js", "js/detect.js", "js/varianti.js", "js/confronto.js", "js/riferimenti.js", "js/tendina.js", "js/ordine.js", "js/interruttore.js", "js/tocco-lungo.js", "js/dettaglio.js",
+  "js/rilievo-ui.js", "js/lidar-servizio.js", "js/tessere.js", "js/motore.js", "js/worker-rilievo.js", "js/analisi.js", "js/raster.js", "js/proj.js", "js/visual.js", "js/detect.js", "js/varianti.js", "js/confronto.js", "js/riferimenti.js", "js/tendina.js", "js/ordine.js", "js/interruttore.js", "js/dem.js", "js/stile3d.js", "js/vista3d.js", "js/tocco-lungo.js", "js/dettaglio.js",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png",
 ];
 const ESTERNI = [

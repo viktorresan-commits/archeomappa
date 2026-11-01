@@ -251,3 +251,23 @@ ol.results { counter-reset: r; }
 .fab.alto { bottom: 112px; }
 .fab.riaccendi .barra { display: none; } /* livelli spenti da riaccendere: l'icona dei livelli senza la barra */
 .cmpetichetta { flex: 1 1 160px; font-size: 0.85rem; font-weight: 600; }
+
+/* vista 3D a schermo intero (MapLibre), caricata solo al tocco del pulsante «3D» */
+.quick .chip.tre-d { font-weight: 700; letter-spacing: 0.02em; border-color: var(--bosco); }
+.vista3d { position: fixed; inset: 0; z-index: 3000; background: #0b0f0d; display: flex; flex-direction: column; }
+.vista3d .mappa3d { position: relative; flex: 1 1 auto; min-height: 0; } /* con «.vista3d» davanti vince su «.maplibregl-map { position: relative }» della libreria */
+.barra3d {
+  position: absolute; z-index: 2; top: max(10px, env(safe-area-inset-top)); left: 10px; right: 56px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none;
+}
+.barra3d > * { pointer-events: auto; box-shadow: var(--ombra); }
+.stato3d { background: rgba(255, 255, 255, 0.92); color: #15241c; border-radius: 10px; padding: 4px 10px; font-size: 0.8rem; line-height: 1.3; max-width: 100%; }
+.stato3d[data-errore="rete"]::after { content: " · alcune tessere non si caricano (rete)"; color: #a63a2a; }
+.comandi3d {
+  flex: none; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: #0b0f0d; max-height: 40vh; overflow-y: auto;
+}
+.gruppo3d { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.etichetta3d { color: #fff; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.85; min-width: 3.2rem; }
+.comandi3d .chip { min-height: 32px; }
+.comandi3d .chip[aria-pressed="false"], .barra3d .chip { background: var(--pannello); color: var(--inchiostro); }
+.comandi3d .chip[aria-pressed="true"] { background: var(--bosco); color: #fff; }
+.popup3d { color: #15241c; font-size: 0.85rem; line-height: 1.35; }

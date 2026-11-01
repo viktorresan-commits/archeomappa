@@ -20,8 +20,9 @@ import { ordineIniziale, spostaLivello, zIndexDi } from "./ordine.js";
 import { creaConfrontoLivelli } from "./tendina.js";
 import { creaRilevatore, urlGoogleMaps } from "./tocco-lungo.js";
 import { decidiSpegniTutto, ricordatiValidi } from "./interruttore.js";
+import { base3dDa2d, zoomLeaflet as zoomDa3d } from "./stile3d.js";
 
-const VERSIONE = "0.5.2";
+const VERSIONE = "0.6.0";
 let rilievo = null; // scheda «Rilievo» (js/rilievo-ui.js)
 const $ = (id) => document.getElementById(id);
 const EPOCA = Object.fromEntries(EPOCHE.map((e) => [e.id, e]));
@@ -617,6 +618,7 @@ function disegnaRapidi() {
   const rapidi = [...sovr.values()].filter((r) => r.def.rapido);
   const nomeBase = BASE_BREVE[baseAttiva] ?? baseAttiva;
   barra.replaceChildren(
+    h("button", { type: "button", class: "chip tre-d", title: "Vista 3D del terreno con le altezze", "aria-label": "Apri la vista 3D del terreno", onclick: apri3D }, "3D"),
     h("button", { type: "button", class: "chip", title: "Scegli la mappa di base", "aria-label": `Mappa di base: ${nomeBase}. Tocca per sceglierne un'altra`, onclick: scegliBase }, `Base: ${nomeBase}`),
     ...rapidi.map((r) => {
       const fuori = r.on && r.def.minZoom && z < r.def.minZoom;
@@ -635,6 +637,34 @@ function disegnaRapidi() {
       onclick: () => (confrontoLivelli.attivo ? fermaConfronto() : apriConfronto()),
     }, confrontoLivelli.attivo ? "Ferma confronto" : "Confronta"),
   );
+}
+
+// ------------------------------------------- vista 3D del terreno (MapLibre, caricata solo al tocco di «3D»)
+
+let aprendo3d = false;
+async function apri3D() {
+  if (aprendo3d) return;
+  aprendo3d = true;
+  try {
+    if (sessioneConfronto && !confrontoOccupato) await fermaConfronto();
+    toast("Apro la vista 3D…");
+    const { apriVista3D } = await import("./vista3d.js");
+    const c = map.getCenter();
+    const lidar = sovr.get("lidar");
+    await apriVista3D({
+      centro: [c.lat, c.lng],
+      zoom: map.getZoom(),
+      base: base3dDa2d(baseAttiva),
+      ombre: true,
+      lidar: lidar?.on && lidar.urlEffettivo && lidar.livelliEffettivi ? { url: lidar.urlEffettivo, livelli: lidar.livelliEffettivi, versione: lidar.def.versione ?? "1.1.1" } : null,
+      toast,
+      alChiudere: ({ lat, lon, zoom }) => map.setView([lat, lon], Math.max(map.getMinZoom?.() ?? 2, Math.min(map.getMaxZoom?.() ?? 19, Math.round(zoom)))),
+    });
+  } catch (e) {
+    toast(`La vista 3D non si apre: ${messaggioErrore(e)}`);
+  } finally {
+    aprendo3d = false;
+  }
 }
 
 // ------------------------------------------- confronto a mano fra due livelli (cursore a tendina, lampeggio)

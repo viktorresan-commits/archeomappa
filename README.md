@@ -8,7 +8,7 @@ Non ha account, pagamenti, pubblicità né tracciamento. Tutto resta nel disposi
 
 ### Fase 1: mappa, siti noti, zone, fonti
 
-- **Pulsanti sulla mappa**: sopra la mappa ci sono i pulsanti per cambiare la mappa di base e per accendere o spegnere subito i livelli più usati (LiDAR, ortofoto, IGM, catasto, rilievo ombreggiato). Non serve aprire ogni volta il pannello Livelli. Un livello che si vede solo da vicino lo dice sul pulsante («zoom 15+»); uno che ha dato errori ha un «!». Il pulsante della base apre l'elenco di tutte le mappe di base. **«Spegni tutto»** è il pulsante tondo con una sola icona in basso a sinistra della mappa, sopra la scala: è un interruttore: il primo tocco spegne tutti i livelli sovrapposti (le mappe di base restano) e ricorda quali erano accesi; il secondo tocco li riaccende (la barra sull'icona sparisce quando il tasto sta per riaccendere). L'elenco resta salvato anche dopo aver chiuso l'app. Se nel frattempo si accende a mano un altro livello, il tasto torna a spegnere e ricorda solo quelli che spegne.
+- **Pulsanti sulla mappa**: sopra la mappa ci sono i pulsanti per cambiare la mappa di base e per accendere o spegnere subito i livelli più usati (LiDAR, ortofoto, IGM, catasto, rilievo ombreggiato). Non serve aprire ogni volta il pannello Livelli. Un livello che si vede solo da vicino lo dice sul pulsante («zoom 15+»); uno che ha dato errori ha un «!». Il pulsante della base apre l'elenco di tutte le mappe di base. Il primo pulsante della barra, **«3D»**, apre la vista 3D del terreno (vedi sotto). **«Spegni tutto»** è il pulsante tondo con una sola icona in basso a sinistra della mappa, sopra la scala: è un interruttore: il primo tocco spegne tutti i livelli sovrapposti (le mappe di base restano) e ricorda quali erano accesi; il secondo tocco li riaccende (la barra sull'icona sparisce quando il tasto sta per riaccendere). L'elenco resta salvato anche dopo aver chiuso l'app. Se nel frattempo si accende a mano un altro livello, il tasto torna a spegnere e ricorda solo quelli che spegne.
 - **Quale livello sta sopra e quale sotto**: nell'elenco dei livelli sovrapposti ogni riga ha ▲ e ▼. L'elenco va dall'alto al basso: il primo sta sopra tutti. L'ordine vale per i livelli accesi e si ricorda; i livelli spenti restano al loro posto nell'elenco e prendono quel posto quando si accendono.
 - **Mappe di base** (tutte libere o con uso gratuito, ciascuna con la propria attribuzione): OpenStreetMap, OpenTopoMap (curve di livello), satellite Esri, **CyclOSM** (sentieri, mulattiere, curve di livello), **OpenStreetMap Umanitaria (HOT)**, **CARTO Voyager** e **CARTO Positron** (sfondo chiaro, adatto a leggere i livelli sovrapposti), **Sentinel-2 senza nuvole (EOX)**, mosaico satellitare a 10 m. Sentinel-2 EOX è offerto per uso **non commerciale**: l'app lo scrive nell'elenco. I server delle basi libere sono di volontari o di aziende che possono cambiare le condizioni: se una non si carica, ce ne sono altre.
 - **Tocco lungo sulla mappa**: tenendo premuto un punto (circa mezzo secondo, senza muovere il dito) si apre un riquadro con le coordinate, «Copia», «Apri in Google Maps» (apre quel punto nell'app o nel sito di Google Maps) e «Usa come centro». Con il mouse vale anche il tasto destro. Il gesto non scatta se si trascina la mappa o se si zooma con due dita, e il rilascio non sposta il centro di ricerca. Nella modalità pubblica coordinate e collegamento sono arrotondati come il resto dell'app. «Apri in Google Maps» invia a Google le coordinate di quel punto, come ogni collegamento a Google Maps.
@@ -21,6 +21,14 @@ Non ha account, pagamenti, pubblicità né tracciamento. Tutto resta nel disposi
 - **Accesso**: modalità «ente» (coordinate esatte) o «pubblica» (posizioni arrotondate a circa 1 km, zone disattivate). Quale adottare lo decide l'ente.
 - Pulsante **Segnala un ritrovamento fortuito** con le indicazioni di legge e le coordinate da copiare.
 - Funziona senza rete per ciò che è già stato visto; link condivisibili tipo `#15/42.98/12.5`.
+
+### Vista 3D del terreno (dalla 0.6.0)
+
+Il pulsante **«3D»** (il primo della barra in alto) apre a tutto schermo il terreno in rilievo attorno al centro della mappa, con la stessa mappa di base di quella in uso (satellite, topografica o stradale; le altre basi ripiegano sul satellite). Si ruota con due dita o con il tasto destro, si inclina e si ingrandisce come in qualsiasi mappa 3D; toccando un punto compaiono **quota in metri e coordinate**. Sotto la mappa ci sono i comandi: basi, **Ombre** (ombreggiatura dalle stesse quote), **Edifici** (blocchi di OpenStreetMap con l'altezza dichiarata), **LiDAR** (solo se è acceso sulla mappa 2D), **esagerazione delle altezze** ×1 (reale), ×1,5, ×2, ×3, **Dall'alto** (pianta, nord in alto) e **Inclina**; in alto a destra ci sono zoom e bussola (un tocco sulla bussola rimette il nord in alto). Si esce con «✕ Chiudi 3D», con Esc o con il tasto Indietro di Android; la mappa 2D riparte dal punto in cui si era arrivati.
+
+**Da dove vengono le altezze.** Da zoom 12 in su, dentro l'Italia, le quote sono quelle di **TINITALY** (INGV, passo 10 m, CC BY 4.0) chieste al servizio WCS dell'INGV come GeoTIFF a decimali; dove il servizio non ha dato (mare, bordi, buchi) o fuori dall'Italia e a scala larga l'app completa con le quote mondiali **Terrarium** (circa 30 m di passo reale), e se TINITALY non risponde ripiega su queste e lo scrive nella riga di stato. Le quote del 3D sono mostrate in metri interi, perché il dato è a 10 m. Le tessere scaricate restano nella cache del dispositivo (circa 0,7 MB per tessera di quota la prima volta).
+
+**Che cosa NON è.** Non è il 3D fotogrammetrico di Google Earth: non ci sono edifici e alberi modellati dalle foto, ma un terreno liscio a 10 m con sopra l'immagine satellitare e i blocchi degli edifici di OpenStreetMap (che hanno l'altezza solo dove qualcuno l'ha inserita; l'esagerazione non li alza). «Altezze precise» vuol dire precise quanto un modello a 10 m: errori verticali di alcuni metri sono normali, più grandi sulle pareti ripide. **Il LiDAR a 1 m del Ministero non fornisce quote vere** attraverso il suo servizio (solo un'immagine ombreggiata): nel 3D si può soltanto stenderlo sopra il rilievo come immagine, e solo nell'app Android (o con il proxy), perché è un servizio `http`. La vista usa WebGL2 e MapLibre GL JS 5.7.0 (BSD), incluso nell'app e caricato soltanto al tocco di «3D».
 
 ### Fase 2: rilievo LiDAR e anomalie (scheda «Rilievo»)
 
@@ -37,6 +45,8 @@ Il servizio non dà le quote ma un'immagine a 256 livelli di grigio (la stessa i
 **0.5.1: LiDAR coperto dalle «Ombre».** Nella 0.5.0 l'ordine di partenza dei livelli metteva «Ombre» (TINITALY, 10 m, semitrasparente) sopra il LiDAR: con entrambi accesi il LiDAR a 1 m risultava velato da un'immagine molto più sfocata, soprattutto agli ingrandimenti alti (nella 0.4.0 stava sopra chi era stato acceso per ultimo). Ora il LiDAR sta sopra le ombreggiature; l'ordine salvato dalla 0.5.0 viene lasciato da parte (si può cambiare con ▲ e ▼). Non si è potuto provare su un telefono vero: la causa è dimostrata come ordine dei livelli in un browser, non come spiegazione certa del problema segnalato.
 
 **0.5.2: «Spegni tutto» riaccende.** Il pulsante tondo in basso a sinistra non spegne più e basta: dopo aver spento i livelli, un secondo tocco li riaccende uguali a prima (stesso elenco, stessa trasparenza e stesso ordine; il LiDAR riparte con la regione scelta). L'icona cambia: con la barra = «spegni», senza barra = «riaccendi». L'elenco dei livelli spenti resta salvato (`am.spenti`) anche dopo aver chiuso l'app. Prove nel browser: spegni, riaccendi, riavvio con tutto spento, livello acceso a mano nel frattempo.
+
+**0.6.0: vista 3D.** Nuovo pulsante «3D» (vedi la sezione sopra). Il pulsante «Spegni tutto» resta in basso a *sinistra*, come richiesto il 30 ottobre.
 
 In alternativa avanzata si può usare un file proprio (GeoTIFF o ASCII Grid), che resta sul dispositivo e non viene inviato a nessuno.
 
@@ -95,7 +105,7 @@ Per il solo involucro senza GitHub resta valida anche la strada pwabuilder.com, 
 
 ## Aggiornare
 
-Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v10`, poi `am-v11`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.5.2), la versione in `package.json` e `apk/package.json` e, se aggiungi file, la lista `GUSCIO` di `sw.js` (altrimenti l'app non parte senza rete).
+Dopo ogni modifica cambia `VERSIONE` in `sw.js` (ora `am-v11`, poi `am-v12`…): così i dispositivi scaricano i file nuovi e cancellano la cache vecchia. Cambia anche `VERSIONE` in `js/app.js` (ora 0.6.0), la versione in `package.json` e `apk/package.json` e, se aggiungi file, la lista `GUSCIO` di `sw.js` (altrimenti l'app non parte senza rete).
 
 ## Provare la logica
 
@@ -120,6 +130,8 @@ Nessuna dipendenza npm (Node 18 o più recente). Le prove sul rilievo creano da 
 - `tests/test-ordine.mjs`: ordine dei livelli sovrapposti (▲▼, livelli spenti, ordine salvato);
 - `tests/test-tocco-lungo.mjs`: riconoscimento del tocco lungo (durata, tolleranza, due dita, soppressione del click) e collegamento a Google Maps;
 - `tests/test-dettaglio.mjs`: levigatura dei gradini a 8 bit su terreni finti, con l'errore misurato prima e dopo (ombre, quote, fossato, argine, muro).
+- `tests/test-dem.mjs`: lettore GeoTIFF dell'INGV (a tessere, big-endian, decimali, vuoti), ricampionamento sulla tessera perché il servizio restituisce un riquadro più largo, riempimento dei buchi, codifica Terrarium e scelta della fonte;
+- `tests/test-stile3d.mjs`: stile della vista 3D (rilievo, basi, ombre, edifici, LiDAR, attribuzioni), conversione di ingrandimento Leaflet/MapLibre, indirizzi delle tessere e testo della quota.
 
 Per rigenerare le icone: `python3 tools/make_icons.py` (richiede Pillow).
 
@@ -146,6 +158,10 @@ js/visual.js                 ombre, rilievo locale, cielo visibile, colori, ripr
 js/dettaglio.js              levigatura dei gradini a 8 bit del servizio
 js/ordine.js                 ordine (sopra/sotto) dei livelli sovrapposti
 js/tocco-lungo.js            tocco lungo sulla mappa e collegamento a Google Maps
+js/dem.js                    quote TINITALY (GeoTIFF dell'INGV) e Terrarium: lettura, ricampionamento, codifica
+js/stile3d.js                stile della vista 3D e indirizzi delle tessere
+js/vista3d.js                vista 3D (MapLibre): quote, comandi, chiusura
+vendor/maplibre/             MapLibre GL JS 5.7.0 (BSD), caricato solo al tocco di «3D»
 js/detect.js                 rilevatore di anomalie e regole
 tools/make_test_dem.py       terreno finto per le prove
 tools/proxy-pcn-worker.js    proxy gratuito (Cloudflare Worker) per i servizi del Ministero
@@ -176,6 +192,8 @@ La mappa usa Leaflet 1.9.4 caricato da unpkg; il service worker lo conserva in c
 Le prove della logica passano. L'interfaccia è stata provata in Chromium headless con una libreria cartografica sostitutiva e servizi simulati: schede, ricerca, filtri, zone, fonti, esportazioni, modalità pubblica, protezione dall'iniezione di HTML, cache e riapertura senza rete. Per il rilievo, sempre in Chromium: caricamento di un GeoTIFF e di un ASCII, lettura nel Web Worker e ripiego senza worker, sei visualizzazioni, ricerca delle anomalie, filtro edifici, esportazioni, file non valido, impostazioni salvate.
 
 Il livello del Ministero è stato provato in Chromium con Leaflet vero e risposte simulate in tre casi: app Android simulata (richieste `http`, immagini caricate), sito `https` senza proxy (richieste `https` e messaggio chiaro se il servizio non risponde) e sito con proxy. Il programma del proxy è provato con un servizio simulato. In Chromium, con client nativo simulato, sono provati anche: il ripiego quando l'immagine normale non carica, il messaggio vero del servizio in caso di errore, il pulsante «Perché non si vede?», il rilievo dal servizio senza file (scelta regione e livello, scarico, quote in metri o livelli relativi, ricerca delle anomalie, nessun riscarico se l'area non cambia) e lo stesso dal sito con proxy che consente la lettura. Sempre in Chromium con client nativo simulato: la verifica su tessera vera di tutti i servizi, la richiesta del catasto (versione 1.3.0, EPSG:4258, BBOX in ordine latitudine e longitudine attorno al centro) e la scelta del livello IGM.
+
+Vista 3D: in Chromium con WebGL2 (render software) e MapLibre vero, con TINITALY, Terrarium, satellite ed edifici simulati ma con file nel formato vero: apertura al tocco di «3D», quote lette dal terreno 3D che coincidono con quelle del file entro 1,5 m (e non con quelle mondiali), dichiarazione della fonte, cambio base, ombre, edifici, esagerazione ×2, tocco con quota, chiusura con Esc e con Indietro, riapertura. Il lettore del GeoTIFF dell'INGV è stato provato anche sul servizio vero, da un computer di GitHub («Actions → Diagnosi 3D quote»): il servizio restituisce un riquadro più largo di quello chiesto, e l'app lo ricampiona leggendo la georeferenziazione.
 
 Non è stata provata su telefoni veri, con i servizi del Ministero reali (nemmeno le immagini LiDAR che restituiscono davvero), **con la costruzione dell'APK su GitHub (non eseguibile dall'ambiente di sviluppo)**, con un proxy messo davvero online né **con un file LiDAR italiano vero**: nessun dato reale era raggiungibile. Va fatta una prova sul campo prima di consegnarla.
 
